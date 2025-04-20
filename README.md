@@ -1,6 +1,6 @@
 # Plata Credit Risk Prediction Project
 
-This project analyzes credit risk using LendingClub data.
+This project analyses credit risk using LendingClub data.
 The analysis, modeling, and deployment simulation are documented in the following Jupyter Notebooks:
 
 1.  **`submission/1_Analytics.ipynb`**: Contains the Exploratory Data Analysis (EDA) and initial data processing steps.
