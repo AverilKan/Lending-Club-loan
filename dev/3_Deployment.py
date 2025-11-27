@@ -22,7 +22,7 @@ from src.predictor import CreditPredictor
 
 # Explicitly import custom transformers needed for unpickling
 try:
-    from src.transformers import EmpLengthConverter, CreditHistoryCalculator, CountBinarizer
+    from src.transformers import EmpLengthConverter, CreditHistoryCalculator, InterestRateRiskTierTransformer
 except ModuleNotFoundError:
     print("Warning: Could not import transformers directly.")
 
@@ -67,9 +67,9 @@ except Exception as e:
 # Single sample application data
 sample_data_hardcoded = [
     {
-        'loan_amnt': 15000, 'funded_amnt': 15000, 'funded_amnt_inv': 15000, 
-        'term': ' 36 months', 'int_rate': 10.5, 'installment': 487.5, 
-        'grade': 'B', 'sub_grade': 'B3', 'emp_length': '5 years', 
+        'loan_amnt': 15000, 'funded_amnt': 15000, 'funded_amnt_inv': 15000,
+        'term': ' 36 months', 'int_rate': 10.5, 'installment': 487.5,
+        'emp_length': '5 years', 
         'home_ownership': 'RENT', 'annual_inc': 65000.0, 'verification_status': 'Source Verified', 
         'issue_d': 'Dec-2016', # Needed for CreditHistoryCalculator
         'purpose': 'debt_consolidation', 'addr_state': 'NY', 'dti': 22.5, 
@@ -77,7 +77,7 @@ sample_data_hardcoded = [
         'earliest_cr_line': 'Aug-2008', # Needed for CreditHistoryCalculator
         'fico_range_low': 680.0, 'fico_range_high': 684.0, 'inq_last_6mths': 0.0, 
         'open_acc': 12.0, 
-        'pub_rec': 0.0, # Needed for CountBinarizer
+        'pub_rec': 0.0,
         'revol_bal': 18000.0, 'revol_util': 75.2, 'total_acc': 30.0, 
         'initial_list_status': 'w', 'collections_12_mths_ex_med': 0.0, 
         'application_type': 'Individual', 'acc_now_delinq': 0.0, 
@@ -86,14 +86,14 @@ sample_data_hardcoded = [
         'bc_util': 80.0, 'chargeoff_within_12_mths': 0.0, 'delinq_amnt': 0.0, 
         'mo_sin_old_il_acct': 120.0, 'mo_sin_old_rev_tl_op': 150.0, 
         'mo_sin_rcnt_rev_tl_op': 5.0, 'mo_sin_rcnt_tl': 5.0, 
-        'mort_acc': 1.0, # Needed for CountBinarizer
+        'mort_acc': 1.0,
         'mths_since_recent_bc': 10.0, 'mths_since_recent_inq': 3.0, 
         'num_accts_ever_120_pd': 0.0, 'num_actv_bc_tl': 4.0, 'num_actv_rev_tl': 6.0, 
         'num_bc_sats': 4.0, 'num_bc_tl': 8.0, 'num_il_tl': 10.0, 'num_op_rev_tl': 6.0, 
         'num_rev_accts': 15.0, 'num_rev_tl_bal_gt_0': 6.0, 'num_sats': 12.0, 
         'num_tl_120dpd_2m': 0.0, 'num_tl_30dpd': 0.0, 'num_tl_90g_dpd_24m': 0.0, 
         'num_tl_op_past_12m': 2.0, 'pct_tl_nvr_dlq': 100.0, 'percent_bc_gt_75': 75.0, 
-        'pub_rec_bankruptcies': 0.0, # Needed for CountBinarizer
+        'pub_rec_bankruptcies': 0.0,
         'tax_liens': 0.0, 'tot_hi_cred_lim': 180000.0, 'total_bal_ex_mort': 40000.0, 
         'total_bc_limit': 15000.0, 'total_il_high_credit_limit': 30000.0, 
         'disbursement_method': 'Cash' 
