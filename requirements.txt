@@ -20,4 +20,3 @@ ipykernel>=6.29.5
 
 # Additional utilities
 python-dateutil>=2.9.0
-pytz>=2025.2
