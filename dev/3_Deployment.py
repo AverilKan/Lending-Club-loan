@@ -190,19 +190,4 @@ else:
     print("Skipping CSV prediction: Sample CSV data not loaded.")
 
 # %% [markdown]
-# ## 5. Discussion: Mapping to SageMaker Structure
-# 
-# This section discusses how the structure of the local `CreditPredictor` conceptually aligns with AWS SageMaker inference components.
-# 
-# - **`CreditPredictor.__init__()` & internal loading:** Maps to SageMaker's `model_fn(model_dir)`, responsible for loading model artifacts from the deployment environment.
-# 
-# - **Input Data Handling (within `predict_proba`/`predict`):** Internal checks/formatting (e.g., ensuring DataFrame, checking columns via schema validation added previously) map to SageMaker's `input_fn(request_body, request_content_type)`, which deserializes and prepares incoming request data.
-# 
-# - **Core Prediction (`self.pipeline.predict_proba(input_df)`):** Maps directly to SageMaker's `predict_fn(input_data, model)`, which performs inference using the loaded model and prepared data.
-# 
-# - **Output Formatting (Return value):** Maps to SageMaker's `output_fn(prediction, response_content_type)`, which serializes prediction results into the desired response format (e.g., JSON).
-# 
-# Organising local code within `CreditPredictor` facilitates adaptation to platforms like SageMaker by mapping these logical steps to the platform's required function signatures (e.g., in an `inference.py` script).
-
-# %% [markdown]
 # --- End of Phase 3: Deployment Simulation ---
