@@ -9,13 +9,12 @@ import joblib
 import pandas as pd
 import numpy as np
 # Need to import custom transformers so joblib can find their definitions
-from src.transformers import EmpLengthConverter, CreditHistoryCalculator, CountBinarizer
+from src.transformers import EmpLengthConverter, CreditHistoryCalculator, InterestRateRiskTierTransformer
 
 # Define default artifact filenames (should match saving step in notebook)
 DEFAULT_MODEL_FILENAME = 'credit_risk_pipeline_v1.joblib'
 # DEFAULT_FEATURES_FILENAME = 'credit_risk_features_v1.pkl' # Feature list no longer loaded here
 
-# --- Potentially maps to SageMaker's model_fn() ---
 def load_model_artifacts(artifact_path='.'):
     """Loads the pipeline artifact."""
     model_file = os.path.join(artifact_path, DEFAULT_MODEL_FILENAME)
@@ -60,7 +59,6 @@ class CreditPredictor:
             print(f"Error initializing CreditPredictor: {e}")
             # Depending on use case, might want to raise an error here
 
-    # --- Potentially maps to SageMaker's predict_fn() ---
     def predict_proba(self, input_data):
         """
         Generates prediction probabilities for the input data.
@@ -80,7 +78,6 @@ class CreditPredictor:
             return None
 
         try:
-            # --- Potentially maps to SageMaker's input_fn() transformation ---
             if isinstance(input_data, list):
                 input_df = pd.DataFrame(input_data)
             elif isinstance(input_data, pd.DataFrame):
@@ -101,7 +98,6 @@ class CreditPredictor:
             positive_class_proba = probabilities[:, 1]
             print("Prediction probabilities generated.")
 
-            # --- Potentially maps to SageMaker's output_fn() ---
             return positive_class_proba
 
         except KeyError as e:

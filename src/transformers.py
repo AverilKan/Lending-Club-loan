@@ -128,241 +128,57 @@ class CreditHistoryCalculator(BaseEstimator, TransformerMixin):
             
         return np.array(output_features, dtype=object)
 
-# Custom transformer for binarizing count features
-class CountBinarizer(BaseEstimator, TransformerMixin):
-    def __init__(self, columns=None):
-        # Default columns to binarize
-        self.columns = columns if columns is not None else ['pub_rec', 'mort_acc', 'pub_rec_bankruptcies']
-        self._input_features = None
-        self._output_features = None
+# Custom transformer for interest rate risk tiers
+class InterestRateRiskTierTransformer(BaseEstimator, TransformerMixin):
+    """
+    Create interest rate risk tiers and binary flags.
+    Captures non-linear relationship between interest rate and default risk.
+    """
 
-    def fit(self, X, y=None):
-        self._input_features = list(X.columns)
-        # Determine output features based on input during fit
-        output_features_list = list(self._input_features)
-        self._new_cols = []
-        for col in self.columns:
-            if col in output_features_list:
-                output_features_list.remove(col)
-                new_col_name = f'{col}_binary'
-                if new_col_name not in output_features_list:
-                    output_features_list.append(new_col_name)
-                    self._new_cols.append(new_col_name)
-            else:
-                 # If col not present, ensure dummy output col is tracked if created in transform
-                 new_col_name = f'{col}_binary'
-                 if new_col_name not in output_features_list:
-                    output_features_list.append(new_col_name)
-                    self._new_cols.append(new_col_name)
-                    
-        self._output_features = np.array(output_features_list, dtype=object)
-        return self
-
-    def transform(self, X):
-        X_copy = X.copy()
-        cols_to_drop = []
-        for col in self.columns:
-            if col in X_copy.columns:
-                new_col_name = f'{col}_binary'
-                # Ensure column is numeric before comparison
-                numeric_col = pd.to_numeric(X_copy[col], errors='coerce')
-                X_copy[new_col_name] = numeric_col.apply(lambda x: 1 if pd.notna(x) and x > 0 else 0)
-                # Mark original column for dropping
-                cols_to_drop.append(col)
-            else:
-                # Create dummy column if expected downstream, fill with 0
-                new_col_name = f'{col}_binary'
-                X_copy[new_col_name] = 0
-                pass # Silently pass
-        
-        # Drop original columns after iteration
-        if cols_to_drop:
-            X_copy = X_copy.drop(columns=cols_to_drop) # Assign back
-            
-        return X_copy
-
-    def get_feature_names_out(self, input_features=None):
-        """Returns feature names after transformation."""
-        # If fit was called, return the stored output features
-        if self._output_features is not None:
-            return self._output_features
-            
-        # Fallback if fit wasn't called (might be less accurate)
-        if input_features is None:
-            raise ValueError("input_features must be provided to get_feature_names_out if fit hasn't been called.")
-            
-        input_features = np.asarray(input_features, dtype=object)
-        output_features_list = list(input_features)
-        for col in self.columns:
-            if col in output_features_list:
-                output_features_list.remove(col)
-                new_col_name = f'{col}_binary'
-                if new_col_name not in output_features_list:
-                    output_features_list.append(new_col_name)
-            else:
-                 new_col_name = f'{col}_binary'
-                 if new_col_name not in output_features_list:
-                    output_features_list.append(new_col_name)
-                    
-        return np.array(output_features_list, dtype=object) 
-
-# Custom transformer for FICO-based risk tiers
-class FICORiskTierTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, fico_low_col='fico_range_low', fico_high_col='fico_range_high'):
-        self.fico_low_col = fico_low_col
-        self.fico_high_col = fico_high_col
-        self._input_features = None
-        
-    def fit(self, X, y=None):
-        self._input_features = list(X.columns)
-        return self
-    
-    def transform(self, X):
-        X_copy = X.copy()
-        
-        # Calculate average FICO score if both ranges available
-        if self.fico_low_col in X_copy.columns and self.fico_high_col in X_copy.columns:
-            X_copy['fico_avg'] = (X_copy[self.fico_low_col] + X_copy[self.fico_high_col]) / 2
-        elif self.fico_low_col in X_copy.columns:
-            X_copy['fico_avg'] = X_copy[self.fico_low_col]
-        elif self.fico_high_col in X_copy.columns:
-            X_copy['fico_avg'] = X_copy[self.fico_high_col]
-        else:
-            # If no FICO columns available, create dummy with median value
-            X_copy['fico_avg'] = 680  # Typical median FICO
-        
-        # Create FICO-based risk tiers (based on standard credit score ranges)
-        def get_fico_risk_tier(fico_score):
-            if pd.isna(fico_score):
-                return 'Unknown'
-            elif fico_score >= 800:
-                return 'Excellent'  # Very low risk
-            elif fico_score >= 740:
-                return 'Very Good'  # Low risk
-            elif fico_score >= 670:
-                return 'Good'       # Moderate risk
-            elif fico_score >= 580:
-                return 'Fair'       # High risk
-            else:
-                return 'Poor'       # Very high risk
-        
-        X_copy['fico_risk_tier'] = X_copy['fico_avg'].apply(get_fico_risk_tier)
-        
-        # Create binary indicators for high/low risk
-        X_copy['fico_high_risk'] = (X_copy['fico_avg'] < 650).astype(int)
-        X_copy['fico_excellent'] = (X_copy['fico_avg'] >= 800).astype(int)
-        
-        # Create FICO range width (measure of uncertainty)
-        if self.fico_low_col in X_copy.columns and self.fico_high_col in X_copy.columns:
-            X_copy['fico_range_width'] = X_copy[self.fico_high_col] - X_copy[self.fico_low_col]
-        else:
-            X_copy['fico_range_width'] = 4  # Typical range width
-        
-        return X_copy
-    
-    def get_feature_names_out(self, input_features=None):
-        """Returns feature names after transformation."""
-        if input_features is None and self._input_features is not None:
-            input_features = self._input_features
-        elif input_features is None:
-            raise ValueError("input_features must be provided if fit hasn't been called.")
-        
-        input_features = np.asarray(input_features, dtype=object)
-        
-        # Add new features created by this transformer
-        new_features = ['fico_avg', 'fico_risk_tier', 'fico_high_risk', 'fico_excellent', 'fico_range_width']
-        
-        output_features = list(input_features) + new_features
-        
-        return np.array(output_features, dtype=object)
-
-# Custom transformer for enhanced credit utilization features
-class CreditUtilizationEnhancer(BaseEstimator, TransformerMixin):
     def __init__(self):
+        self.thresholds = {
+            'low': 10.0,
+            'medium': 15.0,
+            'high': 20.0
+        }
         self._input_features = None
-        
+
     def fit(self, X, y=None):
-        self._input_features = list(X.columns)
+        self._input_features = list(X.columns) if hasattr(X, 'columns') else None
         return self
-    
+
     def transform(self, X):
         X_copy = X.copy()
-        
-        # Enhanced revolving utilization features
-        if 'revol_util' in X_copy.columns:
-            # Convert percentage to decimal if needed
-            X_copy['revol_util_decimal'] = X_copy['revol_util'] / 100
-            
-            # Create utilization risk tiers
-            def get_util_risk_tier(util_rate):
-                if pd.isna(util_rate):
-                    return 'Unknown'
-                elif util_rate >= 90:
-                    return 'Very High'  # >90% utilization
-                elif util_rate >= 70:
-                    return 'High'       # 70-90% utilization
-                elif util_rate >= 30:
-                    return 'Moderate'   # 30-70% utilization
-                elif util_rate >= 10:
-                    return 'Low'        # 10-30% utilization
-                else:
-                    return 'Very Low'   # <10% utilization
-            
-            X_copy['util_risk_tier'] = X_copy['revol_util'].apply(get_util_risk_tier)
-            
-            # Binary indicators for high utilization
-            X_copy['high_utilization'] = (X_copy['revol_util'] >= 70).astype(int)
-            X_copy['very_high_utilization'] = (X_copy['revol_util'] >= 90).astype(int)
-        
-        # Enhanced debt-to-income features
-        if 'dti' in X_copy.columns:
-            # DTI risk tiers
-            def get_dti_risk_tier(dti_ratio):
-                if pd.isna(dti_ratio):
-                    return 'Unknown'
-                elif dti_ratio >= 40:
-                    return 'Very High'  # >40% DTI
-                elif dti_ratio >= 30:
-                    return 'High'       # 30-40% DTI
-                elif dti_ratio >= 20:
-                    return 'Moderate'   # 20-30% DTI
-                elif dti_ratio >= 10:
-                    return 'Low'        # 10-20% DTI
-                else:
-                    return 'Very Low'   # <10% DTI
-            
-            X_copy['dti_risk_tier'] = X_copy['dti'].apply(get_dti_risk_tier)
-            
-            # Binary indicators for high DTI
-            X_copy['high_dti'] = (X_copy['dti'] >= 30).astype(int)
-            X_copy['very_high_dti'] = (X_copy['dti'] >= 40).astype(int)
-        
-        # Credit account diversity features
-        if 'total_acc' in X_copy.columns and 'open_acc' in X_copy.columns:
-            # Account utilization rate (open/total)
-            X_copy['acc_utilization_rate'] = X_copy['open_acc'] / (X_copy['total_acc'] + 1e-8)
-            
-            # Closed account ratio
-            X_copy['closed_acc_ratio'] = (X_copy['total_acc'] - X_copy['open_acc']) / (X_copy['total_acc'] + 1e-8)
-        
+
+        if 'int_rate' in X_copy.columns:
+            # Create risk tiers
+            X_copy['int_rate_tier'] = pd.cut(
+                X_copy['int_rate'],
+                bins=[-np.inf, self.thresholds['low'],
+                      self.thresholds['medium'], self.thresholds['high'], np.inf],
+                labels=['Low_Risk', 'Medium_Risk', 'High_Risk', 'Very_High_Risk']
+            )
+
+            # Binary high-risk indicators
+            X_copy['high_int_rate'] = (X_copy['int_rate'] > self.thresholds['medium']).astype(int)
+            X_copy['very_high_int_rate'] = (X_copy['int_rate'] > self.thresholds['high']).astype(int)
+        else:
+            # Graceful degradation if int_rate missing
+            X_copy['int_rate_tier'] = 'Unknown'
+            X_copy['high_int_rate'] = 0
+            X_copy['very_high_int_rate'] = 0
+
         return X_copy
-    
+
     def get_feature_names_out(self, input_features=None):
-        """Returns feature names after transformation."""
         if input_features is None and self._input_features is not None:
             input_features = self._input_features
         elif input_features is None:
-            raise ValueError("input_features must be provided if fit hasn't been called.")
-        
+            input_features = []
+
         input_features = np.asarray(input_features, dtype=object)
-        
-        # Add new features created by this transformer
-        new_features = [
-            'revol_util_decimal', 'util_risk_tier', 'high_utilization', 'very_high_utilization',
-            'dti_risk_tier', 'high_dti', 'very_high_dti',
-            'acc_utilization_rate', 'closed_acc_ratio'
-        ]
-        
+        new_features = ['int_rate_tier', 'high_int_rate', 'very_high_int_rate']
         output_features = list(input_features) + new_features
-        
+
         return np.array(output_features, dtype=object)
+
