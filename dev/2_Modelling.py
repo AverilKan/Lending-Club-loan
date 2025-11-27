@@ -73,80 +73,8 @@ from sklearn.metrics import (
 # Statistical checks
 from scipy.stats import skew
 
-# Memory monitoring and optimization
-import psutil
-import gc
-from tqdm import tqdm
-
 # Import Custom Transformers
-from src.transformers import EmpLengthConverter, CreditHistoryCalculator, CountBinarizer, FICORiskTierTransformer, CreditUtilizationEnhancer
-
-# Import Memory Utilities
-try:
-    from memory_utils import (
-        log_memory_usage, optimize_dataframe_memory, force_garbage_collection,
-        chunked_data_processing, monitor_data_loading, MemoryMonitor,
-        get_available_memory, check_memory_requirements
-    )
-    MEMORY_UTILS_AVAILABLE = True
-    print("📊 Memory optimization utilities loaded")
-except ImportError:
-    print("⚠️ Memory utilities not available - proceeding without optimization")
-    MEMORY_UTILS_AVAILABLE = False
-
-# Define InterestRateRiskTierTransformer
-class InterestRateRiskTierTransformer(BaseEstimator, TransformerMixin):
-    """Create interest rate risk tiers based on validated EDA hierarchy"""
-    
-    def __init__(self):
-        # Thresholds based on EDA risk analysis
-        self.thresholds = {
-            'low': 10.0,      # Low risk threshold
-            'medium': 15.0,   # Medium risk threshold  
-            'high': 20.0      # High risk threshold
-        }
-    
-    def fit(self, X, y=None):
-        if 'int_rate' in X.columns:
-            print(f"✅ Interest rate available for risk tier transformation")
-            print(f"   • Rate range: {X['int_rate'].min():.1f}% - {X['int_rate'].max():.1f}%")
-        else:
-            print("⚠️ Interest rate not found - check feature retention")
-        return self
-    
-    def transform(self, X):
-        X = X.copy()
-        
-        if 'int_rate' in X.columns:
-            # Create risk tiers based on EDA analysis
-            X['int_rate_tier'] = pd.cut(X['int_rate'], 
-                                       bins=[-np.inf, self.thresholds['low'], 
-                                            self.thresholds['medium'], self.thresholds['high'], np.inf],
-                                       labels=['Low_Risk', 'Medium_Risk', 'High_Risk', 'Very_High_Risk'])
-            
-            # Create binary high-risk indicators
-            X['high_int_rate'] = (X['int_rate'] > self.thresholds['medium']).astype(int)
-            X['very_high_int_rate'] = (X['int_rate'] > self.thresholds['high']).astype(int)
-            
-            # Create risk score relative to portfolio average
-            portfolio_avg = X['int_rate'].mean()
-            X['int_rate_risk_score'] = X['int_rate'] / portfolio_avg
-            
-            # Create risk premium features
-            X['int_rate_premium'] = X['int_rate'] - X['int_rate'].median()
-            
-            print(f"✅ Interest rate risk features created:")
-            print(f"   • Risk tiers: {X['int_rate_tier'].value_counts().to_dict()}")
-            print(f"   • High risk loans: {X['high_int_rate'].sum():,} ({X['high_int_rate'].mean():.1%})")
-            
-        return X
-    
-    def get_feature_names_out(self, input_features=None):
-        """Return feature names for output"""
-        base_features = input_features if input_features is not None else []
-        new_features = ['int_rate_tier', 'high_int_rate', 'very_high_int_rate', 
-                       'int_rate_risk_score', 'int_rate_premium']
-        return list(base_features) + new_features
+from src.transformers import EmpLengthConverter, CreditHistoryCalculator, InterestRateRiskTierTransformer
 
 # Configure settings
 warnings.filterwarnings('ignore')
@@ -619,9 +547,7 @@ else:
 # Define planned feature engineering steps using custom transformers for INDEPENDENT features only.
 # *   Convert `emp_length` to numerical (`EmpLengthConverter`).
 # *   Create `credit_hist_years` from `issue_d` and `earliest_cr_line` (`CreditHistoryCalculator`).
-# *   Binarise count features (`pub_rec`, `mort_acc`, `pub_rec_bankruptcies`) (`CountBinarizer`).
-# *   Create FICO-based risk tiers (`FICORiskTierTransformer`).
-# *   Derive credit utilization and debt-to-income ratios with enhanced features.
+# *   Create interest rate risk tiers and binary flags (`InterestRateRiskTierTransformer`).
 
 # %% [markdown]
 # ### 3.3 Independent Categorical Variable Encoding Strategy
@@ -854,33 +780,19 @@ if preprocessor is not None and 'y_train' in locals() and y_train is not None:
 
     # Full pipeline: Independent Custom FE -> Preprocessing -> Classifier
     pipeline_lgbm_baseline = Pipeline([
-        ('feature_engineering_emp', EmpLengthConverter()), 
-        ('feature_engineering_hist', CreditHistoryCalculator()), 
-        ('feature_engineering_bin', CountBinarizer()), 
-        ('feature_engineering_fico', FICORiskTierTransformer()),
-        ('feature_engineering_credit', CreditUtilizationEnhancer()),
-        ('feature_engineering_intrate', InterestRateRiskTierTransformer()),  # CRITICAL ADDITION
+        ('feature_engineering_emp', EmpLengthConverter()),
+        ('feature_engineering_hist', CreditHistoryCalculator()),
+        ('feature_engineering_intrate', InterestRateRiskTierTransformer()),
         ('preprocessing', preprocessor),
         ('classifier', lgbm_model_baseline)
     ])
 
-    # Train with memory monitoring
-    if MEMORY_UTILS_AVAILABLE:
-        with MemoryMonitor("Baseline LightGBM Training"):
-            print("Training baseline LightGBM pipeline...")
-            start_time = time.time()
-            pipeline_lgbm_baseline.fit(X_train, y_train)
-            end_time = time.time()
-            print(f"Training complete. Time: {end_time - start_time:.2f} seconds")
-            
-            # Cleanup after training
-            force_garbage_collection()
-    else:
-        print("Training baseline LightGBM pipeline...")
-        start_time = time.time()
-        pipeline_lgbm_baseline.fit(X_train, y_train)
-        end_time = time.time()
-        print(f"Training complete. Time: {end_time - start_time:.2f} seconds")
+    # Train pipeline
+    print("Training baseline LightGBM pipeline...")
+    start_time = time.time()
+    pipeline_lgbm_baseline.fit(X_train, y_train)
+    end_time = time.time()
+    print(f"Training complete. Time: {end_time - start_time:.2f} seconds")
 
 else:
     print("Error: Preprocessor or training data not available.")
@@ -949,12 +861,9 @@ if preprocessor is not None and 'y_train' in locals() and y_train is not None:
 
     # Full pipeline with Independent Feature Engineering
     pipeline_lgbm_baseline = Pipeline([
-        ('feature_engineering_emp', EmpLengthConverter()), 
-        ('feature_engineering_hist', CreditHistoryCalculator()), 
-        ('feature_engineering_bin', CountBinarizer()), 
-        ('feature_engineering_fico', FICORiskTierTransformer()),
-        ('feature_engineering_credit', CreditUtilizationEnhancer()),
-        ('feature_engineering_intrate', InterestRateRiskTierTransformer()),  # CRITICAL ADDITION
+        ('feature_engineering_emp', EmpLengthConverter()),
+        ('feature_engineering_hist', CreditHistoryCalculator()),
+        ('feature_engineering_intrate', InterestRateRiskTierTransformer()),
         ('preprocessing', preprocessor),
         ('classifier', lgbm_model_baseline)
     ])
@@ -1060,37 +969,23 @@ if preprocessor is not None and 'y_train' in locals() and y_train is not None:
     
     # Rebuild the full pipeline with the tuned model and Independent Feature Engineering
     tuned_lgbm_pipeline = Pipeline([
-        ('feature_engineering_emp', EmpLengthConverter()), 
-        ('feature_engineering_hist', CreditHistoryCalculator()), 
-        ('feature_engineering_bin', CountBinarizer()), 
-        ('feature_engineering_fico', FICORiskTierTransformer()),
-        ('feature_engineering_credit', CreditUtilizationEnhancer()),
-        ('feature_engineering_intrate', InterestRateRiskTierTransformer()),  # CRITICAL ADDITION
+        ('feature_engineering_emp', EmpLengthConverter()),
+        ('feature_engineering_hist', CreditHistoryCalculator()),
+        ('feature_engineering_intrate', InterestRateRiskTierTransformer()),
         ('preprocessing', preprocessor),
         ('classifier', tuned_lgbm_model)
     ])
 
-    # Re-fit the final pipeline with memory monitoring
+    # Refit the final pipeline
     try:
-        if MEMORY_UTILS_AVAILABLE:
-            with MemoryMonitor("Final Tuned LightGBM Training"):
-                print("\nRefitting final tuned pipeline on full training data...")
-                start_time = time.time()
-                tuned_lgbm_pipeline.fit(X_train, y_train)
-                end_time = time.time()
-                print(f"Refitting complete. Time: {end_time - start_time:.2f} seconds")
-                
-                # Cleanup after training
-                force_garbage_collection()
-        else:
-            print("\nRefitting final tuned pipeline on full training data...")
-            start_time = time.time()
-            tuned_lgbm_pipeline.fit(X_train, y_train)
-            end_time = time.time()
-            print(f"Refitting complete. Time: {end_time - start_time:.2f} seconds")
+        print("\nRefitting final tuned pipeline on full training data...")
+        start_time = time.time()
+        tuned_lgbm_pipeline.fit(X_train, y_train)
+        end_time = time.time()
+        print(f"Refitting complete. Time: {end_time - start_time:.2f} seconds")
     except Exception as e:
-         print(f"Error during final pipeline refitting: {e}")
-         tuned_lgbm_pipeline = None
+        print(f"Error during final pipeline refitting: {e}")
+        tuned_lgbm_pipeline = None
 
 else:
     print("Error: Preprocessor or training data not defined.")
@@ -1447,12 +1342,9 @@ if 'tuned_xgb_pipeline' in locals() and tuned_xgb_pipeline is not None:
     try:
         # Apply all transformations except final classifier
         pipeline_without_classifier = Pipeline([
-            ('feature_engineering_emp', EmpLengthConverter()), 
-            ('feature_engineering_hist', CreditHistoryCalculator()), 
-            ('feature_engineering_bin', CountBinarizer()), 
-            ('feature_engineering_fico', FICORiskTierTransformer()),
-            ('feature_engineering_credit', CreditUtilizationEnhancer()),
-            ('feature_engineering_intrate', InterestRateRiskTierTransformer()),  # CRITICAL ADDITION
+            ('feature_engineering_emp', EmpLengthConverter()),
+            ('feature_engineering_hist', CreditHistoryCalculator()),
+            ('feature_engineering_intrate', InterestRateRiskTierTransformer()),
             ('preprocessing', preprocessor)
         ])
         
