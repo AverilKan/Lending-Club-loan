@@ -4,33 +4,14 @@
 # %% [markdown]
 # ## Introduction
 #
-# ### Why Predict Default? An Investor's Perspective
-#
-# LendingClub investors face a critical challenge: **selecting which loans to fund from thousands of available listings**. While LendingClub provides proprietary risk grades, savvy investors need an **independent risk assessment model** to:
-# - Build diversified portfolios aligned with personal risk tolerance
-# - Identify mispriced loans where LC's grade underestimates risk
-# - Optimize risk-adjusted returns without relying on LC's black-box scoring
-#
-# This analysis establishes the analytical foundation for **independent credit risk modeling** through comprehensive exploratory data analysis (EDA). We will discover the empirical risk hierarchy that drives loan defaults, enabling data-driven portfolio construction.
-#
-# ### What We'll Discover: The Risk Hierarchy
-#
-# Through systematic analysis, we will establish which borrower characteristics most strongly predict default risk:
-# - **Primary risk drivers**: Features with correlation >15% to default
-# - **Secondary indicators**: Credit quality and financial stress signals
-# - **Portfolio factors**: Loan characteristics and behavioral patterns
-#
-# This risk hierarchy will guide feature engineering and model development, ensuring our independent model focuses on the features that matter most.
+# This phase establishes the analytical foundation for independent credit risk modeling through comprehensive exploratory data analysis (EDA) of the Lending Club dataset. Building upon business intelligence requirements, this analysis will define an enhanced target variable representing credit risk, establish a validated risk hierarchy for feature prioritization, assess historical portfolio trends, and identify critical preprocessing strategies for the subsequent modeling phase.
 #
 # **Strategic Objectives:**
 # - Develop enhanced target variable approach to maximize data utilization while maintaining predictive validity
-# - **🎯 Establish empirical risk hierarchy** to guide feature engineering and model development
+# - Establish empirical risk hierarchy to guide feature engineering and model development
 # - Validate business logic through comprehensive historical trend analysis
-# - Create robust preprocessing framework **independent of LendingClub's proprietary grades**
+# - Create robust preprocessing framework for independent model development
 # - Ensure seamless transition from exploratory insights to production-ready modeling pipeline
-#
-# **Independence From LendingClub's Grades:**
-# We intentionally exclude LC's `grade` and `sub_grade` fields to avoid circular reasoning. Our goal is to build a model using only features available to investors at loan listing time, creating a truly independent risk assessment framework.
 
 # %% [markdown]
 # ### 1. Setup and Imports
@@ -828,9 +809,7 @@ if df is not None and numerical_cols:
 # **Findings:** The descriptive statistics highlight a wide variation in the scales of numerical features (e.g., `annual_inc` vs. `int_rate`), confirming the need for scaling (e.g., Standardisation or Normalisation) before modelling. The `policy_code` feature shows virtually zero variance (standard deviation close to 0) and should be excluded from modelling as it provides no discriminatory information.
 
 # %% [markdown]
-# #### 4.3 🎯 RISK HIERARCHY DISCOVERY: Identifying Primary Default Drivers
-#
-# This analysis reveals the empirical risk hierarchy - the quantitative relationship between borrower characteristics and default probability. Understanding this hierarchy is critical for investors to prioritize which features matter most when evaluating loan opportunities.
+# #### 4.3 Correlation Analysis (Numerical Features)
 
 # %%
 # Correlation with target
@@ -840,111 +819,13 @@ if df is not None and numerical_cols:
     print(target_corr)
 
 # %% [markdown]
-# ##### Risk Hierarchy Visualization
-
-# %%
-# Create prominent risk hierarchy visualization
-if df is not None and numerical_cols:
-    print("\n--- 🎯 RISK HIERARCHY: Top Default Predictors ---")
-
-    # Get top correlations (absolute value)
-    target_corr = df[numerical_cols + ['is_bad']].corr(numeric_only=True)['is_bad'].drop('is_bad')
-    top_correlations = target_corr.abs().sort_values(ascending=False).head(10)
-
-    # Create visualization
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=FIGURE_SIZES['analysis'])
-
-    # Left panel: Top 10 correlations (absolute value)
-    colors_abs = [LENDING_COLORS['bad'] if abs(target_corr[feat]) > 0.15
-                   else LENDING_COLORS['fair'] if abs(target_corr[feat]) > 0.05
-                   else LENDING_COLORS['neutral']
-                   for feat in top_correlations.index]
-
-    bars1 = ax1.barh(range(len(top_correlations)), top_correlations.values,
-                     color=colors_abs, alpha=STYLE_CONFIG['alpha'],
-                     edgecolor=LENDING_COLORS['white'], linewidth=STYLE_CONFIG['bar_edge_width'])
-    ax1.set_yticks(range(len(top_correlations)))
-    ax1.set_yticklabels(top_correlations.index, **FONT_CONFIG['tick_label'])
-    ax1.set_xlabel('Absolute Correlation with Default', **FONT_CONFIG['axis_label'])
-    ax1.set_title('🎯 Risk Hierarchy: Strongest Predictors', **FONT_CONFIG['subplot_title'])
-    ax1.axvline(x=0.15, color=LENDING_COLORS['bad'], linestyle='--',
-               linewidth=1.5, alpha=0.7, label='Strong predictor (>15%)')
-    ax1.axvline(x=0.05, color=LENDING_COLORS['fair'], linestyle='--',
-               linewidth=1.5, alpha=0.7, label='Moderate predictor (>5%)')
-    ax1.legend(**FONT_CONFIG['legend'])
-
-    # Add value labels
-    for i, (bar, val) in enumerate(zip(bars1, top_correlations.values)):
-        ax1.text(val + 0.005, i, f'{val:.1%}',
-                va='center', ha='left', **FONT_CONFIG['annotation'])
-
-    # Right panel: Directional correlations (signed)
-    signed_corr = target_corr[top_correlations.index]
-    colors_signed = [LENDING_COLORS['bad'] if val > 0 else LENDING_COLORS['good']
-                     for val in signed_corr.values]
-
-    bars2 = ax2.barh(range(len(signed_corr)), signed_corr.values,
-                     color=colors_signed, alpha=STYLE_CONFIG['alpha'],
-                     edgecolor=LENDING_COLORS['white'], linewidth=STYLE_CONFIG['bar_edge_width'])
-    ax2.set_yticks(range(len(signed_corr)))
-    ax2.set_yticklabels(signed_corr.index, **FONT_CONFIG['tick_label'])
-    ax2.set_xlabel('Correlation with Default (Signed)', **FONT_CONFIG['axis_label'])
-    ax2.set_title('Risk Direction: Positive vs Protective', **FONT_CONFIG['subplot_title'])
-    ax2.axvline(x=0, color=LENDING_COLORS['neutral'], linestyle='-', linewidth=2)
-
-    # Add value labels
-    for i, (bar, val) in enumerate(zip(bars2, signed_corr.values)):
-        x_pos = val + 0.005 if val > 0 else val - 0.005
-        ha = 'left' if val > 0 else 'right'
-        ax2.text(x_pos, i, f'{val:+.1%}',
-                va='center', ha=ha, **FONT_CONFIG['annotation'])
-
-    plt.suptitle('🎯 RISK HIERARCHY DISCOVERY\nEmpirical Evidence for Feature Prioritization',
-                 fontsize=FONT_CONFIG['figure_title']['fontsize'], fontweight=FONT_CONFIG['figure_title']['fontweight'],
-                 y=1.02)
-    plt.tight_layout()
-    plt.show()
-
-    # Print key hierarchy findings
-    print("\n📊 RISK HIERARCHY SUMMARY:")
-    print(f"   1. PRIMARY DRIVER: int_rate ({target_corr['int_rate']:.1%}) - Interest rate is the strongest predictor")
-    print(f"   2. CREDIT QUALITY: fico_range_low ({target_corr['fico_range_low']:.1%}) - Lower FICO = higher risk")
-    print(f"   3. FINANCIAL STRESS: dti ({target_corr['dti']:.1%}) - Higher debt burden = higher risk")
-    print(f"\n   🎯 Key Insight: The risk hierarchy follows intuition:")
-    print(f"      • Pricing (int_rate) captures overall risk assessment")
-    print(f"      • Credit history (FICO) predicts repayment ability")
-    print(f"      • Financial stress (DTI) indicates borrower strain")
-
-# %% [markdown]
-# **🎯 RISK HIERARCHY DISCOVERY - Key Findings:**
-#
-# The correlation analysis reveals a clear **three-tier risk hierarchy** that should guide all feature engineering and model development:
-#
-# **Tier 1: PRIMARY RISK DRIVER (Correlation >20%)**
-# *   **Interest Rate (23.0%)**: The dominant predictor, validating that current pricing mechanisms effectively capture loan risk. This suggests the market has already priced in various risk factors.
-# *   **Investor Implication**: High interest rate loans carry substantially higher default risk - require higher return threshold to justify investment.
-#
-# **Tier 2: CREDIT QUALITY INDICATORS (Correlation 10-15%)**
-# *   **FICO Score (-12.2%)**: Strong negative correlation confirms credit history is a robust predictor. Lower FICO borrowers default at significantly higher rates.
-# *   **Investor Implication**: FICO provides independent risk signal beyond pricing. Investors can use FICO thresholds to filter loan opportunities.
-#
-# **Tier 3: FINANCIAL STRESS SIGNALS (Correlation 5-10%)**
-# *   **DTI Ratio (5.9%)**: Positive correlation indicates borrowers with higher debt burdens face greater default risk.
-# *   **Revolving Utilization (4.0%)**: High credit usage signals financial stress.
-# *   **Investor Implication**: These metrics help identify borrowers under financial strain, even if FICO scores appear acceptable.
-#
-# **📊 Quantitative Risk Comparisons:**
-#
-# To illustrate the magnitude of these relationships, consider:
-# - **FICO Impact**: Borrowers with FICO <650 default at ~3x the rate of FICO >750 (27% vs 9%)
-# - **Interest Rate Impact**: Loans with int_rate >20% default at ~2.5x the rate of <10% (35% vs 14%)
-# - **DTI Impact**: Borrowers with DTI >30 default at ~1.6x the rate of DTI <15 (21% vs 13%)
-#
-# **🎯 Business Implications for Investors:**
-# *   **Portfolio Construction**: Prioritize filtering by interest rate and FICO score thresholds first, then layer in DTI/utilization criteria.
-# *   **Feature Engineering**: Focus transformation and interaction efforts on Tier 1 & 2 features for maximum model impact.
-# *   **Risk-Adjusted Returns**: Use the hierarchy to estimate required return premiums - high int_rate + low FICO requires substantial yield to compensate.
-# *   **Independent Assessment**: This hierarchy provides a framework for evaluating whether LC's assigned grade accurately reflects true risk.
+# **Findings (Target Correlation Analysis):**
+# *   **Primary Risk Driver:** `int_rate` (correlation: 0.230) emerges as the strongest predictor, validating that current interest rate pricing appropriately reflects loan risk levels.
+# *   **Credit Quality Indicators:** FICO scores show expected negative correlation (-0.122), confirming their predictive value for default risk assessment.
+# *   **Financial Stress Signals:** DTI ratio (0.059) and revolving utilization (0.040) show positive correlations, indicating borrower financial stress leads to higher default rates.
+# *   **Loan Characteristics:** Loan amount (0.050) and installment (0.052) show modest positive correlations, suggesting larger loans carry incrementally higher risk.
+# *   **Account Activity Patterns:** Recent account openings and inquiries show positive correlations, indicating credit-seeking behavior correlates with default risk.
+# *   **Business Implications:** The correlation hierarchy provides clear guidance for risk-based pricing and underwriting decisions, with interest rate serving as the primary risk discriminator.
 
 # %%
 # Feature-feature correlation matrix
@@ -1246,14 +1127,6 @@ if df is not None and final_numerical_to_viz:
     print("   • Business Impact: Dashboard validates current risk management framework and identifies optimization opportunities")
 
 # %% [markdown]
-# 📊 **For Investors - Portfolio Impact:**
-# These risk metrics translate directly to expected returns:
-# - **36-month loans**: ~13.6% default rate → requires 15%+ interest to maintain positive returns after defaults
-# - **60-month loans**: ~22.4% default rate → requires 20%+ interest to compensate for elevated risk
-# - **FICO segmentation**: Building a portfolio weighted toward FICO >700 borrowers could reduce default losses by 40-50%
-# - **Purpose filtering**: Avoiding small business loans reduces portfolio default risk by ~10 percentage points
-
-# %% [markdown]
 # #### 5.3 Feature Distribution Analysis (Transformed)
 
 # %%
@@ -1359,9 +1232,6 @@ if df is not None and final_numerical_to_viz:
         print("   • Business Impact: Clear risk separation across all features validates enhanced underwriting approach")
     else:
         print("   ⚠️ No features with sufficient data for analysis")
-
-# %% [markdown]
-# 📊 **For Investors:** Normalized distributions enable our model to better detect non-linear risk patterns in borrower financials. This means the model can identify high-risk borrowers even when their metrics appear acceptable at first glance - a critical capability for avoiding defaults in your portfolio.
 
 # %% [markdown]
 # #### 5.4 Correlation Intelligence & Feature Engineering Insights
@@ -1626,9 +1496,6 @@ if df is not None and 'is_bad' in df.columns and 'months_since_issue' in df.colu
 # *   **Late Loan Inclusion:** Late (31-120 days) loans represent clear distress signals and are appropriately included in the bad outcome definition.
 # *   **Risk Profile Consistency:** Late loans show risk characteristics consistent with other bad outcomes (higher interest rates, lower FICO scores).
 # *   **Data Utilization:** The enhanced approach captures 99.35% of available data while maintaining predictive validity.
-
-# %% [markdown]
-# 📊 **For Investors:** The enhanced target variable approach means our model will be trained on 99.35% of available loan data, providing more robust predictions. This maximizes the statistical power of our independent risk assessment, giving you higher confidence when evaluating loan opportunities against LendingClub's proprietary grades.
 
 # %% [markdown]
 # #### 5.1.3 Data Utilization Comparison Visualizations (Original vs Enhanced)
@@ -1935,9 +1802,6 @@ else:
 # *   **Implication:** These categorical features, particularly `term`, `home_ownership`, and `purpose`, demonstrate significant discriminatory power and are strong candidates for inclusion in the model. The observed relationships (monotonic, non-linear) will inform the choice of encoding strategy (e.g., target encoding, weight of evidence, or one-hot encoding followed by model-based feature selection). Note: `grade` and `sub_grade` have been excluded due to data leakage concerns.
 
 # %% [markdown]
-# 📊 **For Investors:** The 60-month term premium (65% higher default rate) and purpose-based risk variation (2.3x spread) reveal opportunities for targeted portfolio construction. Consider: (1) requiring higher interest premiums for 60-month loans, (2) avoiding small business loans unless rates exceed 18%, and (3) favoring car loans and home improvement loans which show lower default rates.
-
-# %% [markdown]
 # ### 6. Assess Historical Policy Impact (Trends Over Time)
 
 # %% [markdown]
@@ -2141,22 +2005,6 @@ else:
 # 
 # **💼 Executive Summary:**
 # This comprehensive analysis establishes a robust foundation for advanced credit risk modeling with 40% more training data, eliminated data leakage, clear risk hierarchy, and validated business logic. The enhanced approach positions the organization for sophisticated model development while maintaining operational excellence in credit risk management.
-
-# %% [markdown]
-# 📊 **For Investors - Strategic Takeaways:**
-#
-# This comprehensive analysis provides three critical advantages for independent investors:
-#
-# 1. **Risk Hierarchy Framework**: Prioritize loans using int_rate → FICO → DTI filtering, focusing attention where it matters most
-# 2. **Portfolio Diversification**: Use purpose, term, and home ownership segmentation to build balanced portfolios with controlled risk exposure
-# 3. **Independent Validation**: Compare our empirical risk hierarchy against LC's grade assignments to identify mispriced loans
-#
-# **Expected Portfolio Performance**: A disciplined strategy filtering for int_rate <15%, FICO >680, and DTI <25 should achieve:
-# - Default rate: ~8-10% (vs portfolio average of 16%)
-# - Risk-adjusted return: 6-8% annually after defaults
-# - Reduced volatility through diversification across low-risk segments
-#
-# The key is building an **independent risk model** that doesn't rely on LC's proprietary scoring, enabling you to identify opportunities where the market has mispriced risk.
 
 # %% [markdown]
 # #### 7.1 Phase 1 Validation Results Summary

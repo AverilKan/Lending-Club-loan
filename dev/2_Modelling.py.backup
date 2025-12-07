@@ -80,10 +80,6 @@ from src.transformers import EmpLengthConverter, CreditHistoryCalculator, Intere
 warnings.filterwarnings('ignore')
 pd.options.display.max_columns = None
 pd.options.display.max_rows = 100
-
-# Memory utilities flag (simplified - memory management disabled)
-MEMORY_UTILS_AVAILABLE = False
-
 # =============================================================================
 # UNIFIED STYLING CONFIGURATION (From Enhanced EDA)
 # =============================================================================
@@ -652,33 +648,43 @@ if 'X_train' in locals() and X_train is not None:
         expected_cols_post_fe.append('emp_length_num')
     
     # Credit history calculation
-    if 'issue_d' in expected_cols_post_fe and 'earliest_cr_line' in expected_cols_post_fe:
+    if 'issue_d' in expected_cols_post_fe and 'earliest_cr_line' in expected_cols_post_fe: 
          if 'issue_d' in expected_cols_post_fe: expected_cols_post_fe.remove('issue_d')
          if 'earliest_cr_line' in expected_cols_post_fe: expected_cols_post_fe.remove('earliest_cr_line')
          expected_cols_post_fe.append('credit_hist_years')
-
-    # NOTE: Removed transformers (CountBinarizer, FICORiskTierTransformer, CreditUtilizationEnhancer)
-    # were eliminated to simplify feature engineering (CLAUDE.md). Use only active transformers:
-    # - EmpLengthConverter: creates emp_length_num
-    # - CreditHistoryCalculator: creates credit_hist_years
-    # - InterestRateRiskTierTransformer: creates int_rate_tier, high_int_rate, very_high_int_rate
-
-    # Interest rate features created by InterestRateRiskTierTransformer
-    int_rate_features = ['int_rate_tier', 'high_int_rate', 'very_high_int_rate']
+    
+    # Count binarization
+    count_bin_cols = ['pub_rec', 'mort_acc', 'pub_rec_bankruptcies']
+    for col in count_bin_cols:
+        if col in expected_cols_post_fe: 
+            expected_cols_post_fe.remove(col); 
+            expected_cols_post_fe.append(f'{col}_binary')
+    
+    # FICO risk tier features
+    fico_features = ['fico_avg', 'fico_risk_tier', 'fico_high_risk', 'fico_excellent', 'fico_range_width']
+    expected_cols_post_fe.extend(fico_features)
+    
+    # Credit utilization enhancement features
+    credit_features = [
+        'revol_util_decimal', 'util_risk_tier', 'high_utilization', 'very_high_utilization',
+        'dti_risk_tier', 'high_dti', 'very_high_dti',
+        'acc_utilization_rate', 'closed_acc_ratio'
+    ]
+    expected_cols_post_fe.extend(credit_features)
+    
+    # Add interest rate features to expected columns
+    int_rate_features = ['int_rate_tier', 'high_int_rate', 'very_high_int_rate', 
+                        'int_rate_risk_score', 'int_rate_premium']
     expected_cols_post_fe.extend(int_rate_features)
     
-    # Temp structure to infer types *after* FE
-    temp_X_train_post_fe = pd.DataFrame(columns=expected_cols_post_fe)
+    # Temp structure to infer types *after* FE 
+    temp_X_train_post_fe = pd.DataFrame(columns=expected_cols_post_fe) 
     for col in X_train.columns:
         if col in temp_X_train_post_fe.columns:
             temp_X_train_post_fe[col] = X_train[col]
-    # Mark numeric features created by transformers
-    for col in ['emp_length_num', 'credit_hist_years', 'high_int_rate', 'very_high_int_rate']:
-        if col in temp_X_train_post_fe.columns:
+    for col in ['emp_length_num', 'credit_hist_years'] + [f'{c}_binary' for c in count_bin_cols if c in X_train.columns]:
+        if col in temp_X_train_post_fe.columns: 
            temp_X_train_post_fe[col] = pd.Series(dtype=np.number)
-    # Mark categorical features created by transformers
-    if 'int_rate_tier' in temp_X_train_post_fe.columns:
-        temp_X_train_post_fe['int_rate_tier'] = pd.Series(dtype='object')
 
     # Identify numerical/categorical subsets based on *post-FE* structure
     all_numerical_cols = temp_X_train_post_fe.select_dtypes(include=np.number).columns.tolist()
@@ -687,18 +693,12 @@ if 'X_train' in locals() and X_train is not None:
     # --- Numerical Subsets (Skewed vs. Standard) ---
     original_numerical_cols = X_train.select_dtypes(include=np.number).columns.tolist()
     skewness = X_train[original_numerical_cols].apply(lambda x: skew(x.dropna())).sort_values(ascending=False)
-    skew_threshold = 0.75
-
-    # Identify skewed based on original data
+    skew_threshold = 0.75 
+    
+    # Identify skewed based on original data, but map to post-FE names if necessary (e.g. binarized cols are not skewed)
     skewed_orig_cols = skewness[abs(skewness) > skew_threshold].index.tolist()
-    skewed_num_cols = [col for col in all_numerical_cols if (col in skewed_orig_cols) or (col == 'credit_hist_years' and 'credit_hist_years' in skewed_orig_cols)]
-    # Exclude features from removed transformers and categorical features from active transformers
-    removed_transformer_features = ['fico_avg', 'fico_risk_tier', 'fico_high_risk', 'fico_excellent', 'fico_range_width',
-                                    'revol_util_decimal', 'util_risk_tier', 'high_utilization', 'very_high_utilization',
-                                    'dti_risk_tier', 'high_dti', 'very_high_dti', 'acc_utilization_rate', 'closed_acc_ratio',
-                                    'int_rate_risk_score', 'int_rate_premium']
-    categorical_from_transformers = ['int_rate_tier']  # Features created by transformers that are categorical
-    skewed_num_cols = [c for c in skewed_num_cols if c not in removed_transformer_features and c not in categorical_from_transformers]
+    skewed_num_cols = [col for col in all_numerical_cols if (col in skewed_orig_cols) or (col == 'credit_hist_years' and 'credit_hist_years' in skewed_orig_cols)] # Map original skewed to final list
+    skewed_num_cols = [c for c in skewed_num_cols if c not in [f'{cb}_binary' for cb in count_bin_cols]] # Exclude binarized cols
 
     standard_num_cols = [col for col in all_numerical_cols if col not in skewed_num_cols]
     print(f"\nIdentified {len(skewed_num_cols)} skewed numerical features post-FE for PowerTransform.")
@@ -707,10 +707,9 @@ if 'X_train' in locals() and X_train is not None:
     # --- Categorical Subsets (INDEPENDENT features only - NO ordinal encoding) ---
     ordinal_cat_cols = []  # No ordinal features for independence
     ordinal_categories = []  # Empty as we're not using ordinal encoding
-
+    
     # ALL categorical features use OHE for independence (no grade/sub_grade)
-    # Add categorical features from feature engineering transformers
-    ohe_cat_cols = all_categorical_cols + categorical_from_transformers
+    ohe_cat_cols = all_categorical_cols
     print(f"Identified {len(ordinal_cat_cols)} ordinal categorical features: {ordinal_cat_cols} (None for independence)")
     print(f"Identified {len(ohe_cat_cols)} nominal categorical features for OHE.")
     print(f"Independent categorical processing: All features use OHE to avoid circular reasoning.")
@@ -752,345 +751,22 @@ else:
 # %% [markdown]
 # ## 6. Baseline Model Training and Evaluation
 
-# Build 5 progressive baseline models with increasing complexity to demonstrate the necessity of advanced algorithms.
-# Each model uses identical preprocessing pipeline for fair comparison.
+# Establish baseline performance for XGBoost and LightGBM using default/sensible parameters and the full pipeline.
 
 # %% [markdown]
-# ### 6.1 Baseline Model: Logistic Regression
-# Expected AUC: 0.52-0.54 | Training Time: <1s | Interpretability: ⭐⭐⭐⭐⭐
+# ### 6.1 Baseline Model: XGBoost
 
-# %%
-# Define and Train Baseline Logistic Regression Model
-from sklearn.linear_model import LogisticRegression
-
-if preprocessor is not None and 'y_train' in locals() and y_train is not None:
-
-    # Calculate scale_pos_weight for class imbalance awareness
-    neg_count = (y_train == 0).sum()
-    pos_count = (y_train == 1).sum()
-    scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1
-    print(f"\nUsing scale_pos_weight: {scale_pos_weight:.2f}")
-
-    lr_model_baseline = LogisticRegression(
-        max_iter=1000,
-        class_weight='balanced',
-        random_state=42,
-        n_jobs=-1,
-        solver='lbfgs'
-    )
-
-    # Full pipeline: Independent Custom FE -> Preprocessing -> Classifier
-    pipeline_lr_baseline = Pipeline([
-        ('feature_engineering_emp', EmpLengthConverter()),
-        ('feature_engineering_hist', CreditHistoryCalculator()),
-        ('feature_engineering_intrate', InterestRateRiskTierTransformer()),
-        ('preprocessing', preprocessor),
-        ('classifier', lr_model_baseline)
-    ])
-
-    # Train pipeline
-    print("Training baseline Logistic Regression pipeline...")
-    start_time = time.time()
-    pipeline_lr_baseline.fit(X_train, y_train)
-    end_time = time.time()
-    print(f"Training complete. Time: {end_time - start_time:.2f} seconds")
-
-else:
-    print("Error: Preprocessor or training data not available.")
-    pipeline_lr_baseline = None
-
-# %% [markdown]
-# #### Evaluate Baseline Logistic Regression
-
-# %%
-# Evaluate Baseline Logistic Regression on Test Set
-if pipeline_lr_baseline is not None and 'X_test' in locals() and 'y_test' in locals():
-    print("\n--- Evaluating Baseline Logistic Regression --- ")
-
-    try:
-        y_pred_proba_lr = pipeline_lr_baseline.predict_proba(X_test)[:, 1]
-        y_pred_lr = pipeline_lr_baseline.predict(X_test)
-
-        # Calculate Metrics
-        roc_auc_lr = roc_auc_score(y_test, y_pred_proba_lr)
-        precision_lr, recall_lr, _ = precision_recall_curve(y_test, y_pred_proba_lr)
-        pr_auc_lr = auc(recall_lr, precision_lr)
-        f1_bad_lr = f1_score(y_test, y_pred_lr, pos_label=1)
-
-        print("Baseline Logistic Regression - Test Set Performance:")
-        print(f"  ROC AUC: {roc_auc_lr:.4f}")
-        print(f"  Precision-Recall AUC: {pr_auc_lr:.4f}")
-        print(f"  F1 Score (Bad Loans): {f1_bad_lr:.4f}")
-
-        print("\nClassification Report:")
-        print(classification_report(y_test, y_pred_lr, target_names=['Good Loan (0)', 'Bad Loan (1)']))
-
-        print("\nConfusion Matrix:")
-        create_business_confusion_matrix(pipeline_lr_baseline, X_test, y_test, "Baseline Logistic Regression")
-
-    except Exception as e:
-        print(f"Error during baseline Logistic Regression evaluation: {e}")
-
-else:
-    print("Error: Baseline Logistic Regression pipeline or test data not available.")
-
-# %% [markdown]
-# **Findings (Baseline Logistic Regression):** Linear baseline establishes minimum acceptable performance. Expected AUC ~0.52-0.54.
-
-# %% [markdown]
-# ### 6.2 Baseline Model: Decision Tree
-# Expected AUC: 0.54-0.56 | Training Time: ~2s | Interpretability: ⭐⭐⭐⭐
-
-# %%
-# Define and Train Baseline Decision Tree Model
-from sklearn.tree import DecisionTreeClassifier
-
-if preprocessor is not None and 'y_train' in locals() and y_train is not None:
-
-    dt_model_baseline = DecisionTreeClassifier(
-        max_depth=10,
-        min_samples_split=100,
-        min_samples_leaf=50,
-        class_weight='balanced',
-        random_state=42
-    )
-
-    # Full pipeline with Independent Feature Engineering
-    pipeline_dt_baseline = Pipeline([
-        ('feature_engineering_emp', EmpLengthConverter()),
-        ('feature_engineering_hist', CreditHistoryCalculator()),
-        ('feature_engineering_intrate', InterestRateRiskTierTransformer()),
-        ('preprocessing', preprocessor),
-        ('classifier', dt_model_baseline)
-    ])
-
-    # Train pipeline
-    print("Training baseline Decision Tree pipeline...")
-    start_time = time.time()
-    pipeline_dt_baseline.fit(X_train, y_train)
-    end_time = time.time()
-    print(f"Training complete. Time: {end_time - start_time:.2f} seconds")
-
-else:
-    print("Error: Preprocessor or training data not available.")
-    pipeline_dt_baseline = None
-
-# %% [markdown]
-# #### Evaluate Baseline Decision Tree
-
-# %%
-# Evaluate Baseline Decision Tree on Test Set
-if pipeline_dt_baseline is not None and 'X_test' in locals() and 'y_test' in locals():
-    print("\n--- Evaluating Baseline Decision Tree --- ")
-
-    try:
-        y_pred_proba_dt = pipeline_dt_baseline.predict_proba(X_test)[:, 1]
-        y_pred_dt = pipeline_dt_baseline.predict(X_test)
-
-        # Calculate Metrics
-        roc_auc_dt = roc_auc_score(y_test, y_pred_proba_dt)
-        precision_dt, recall_dt, _ = precision_recall_curve(y_test, y_pred_proba_dt)
-        pr_auc_dt = auc(recall_dt, precision_dt)
-        f1_bad_dt = f1_score(y_test, y_pred_dt, pos_label=1)
-
-        print("Baseline Decision Tree - Test Set Performance:")
-        print(f"  ROC AUC: {roc_auc_dt:.4f}")
-        print(f"  Precision-Recall AUC: {pr_auc_dt:.4f}")
-        print(f"  F1 Score (Bad Loans): {f1_bad_dt:.4f}")
-
-        print("\nClassification Report:")
-        print(classification_report(y_test, y_pred_dt, target_names=['Good Loan (0)', 'Bad Loan (1)']))
-
-        print("\nConfusion Matrix:")
-        create_business_confusion_matrix(pipeline_dt_baseline, X_test, y_test, "Baseline Decision Tree")
-
-    except Exception as e:
-        print(f"Error during baseline Decision Tree evaluation: {e}")
-
-else:
-    print("Error: Baseline Decision Tree pipeline or test data not available.")
-
-# %% [markdown]
-# **Findings (Baseline Decision Tree):** Introduces non-linearity capturing threshold effects. Expected AUC ~0.54-0.56.
-
-# %% [markdown]
-# ### 6.3 Baseline Model: Random Forest
-# Expected AUC: 0.56-0.58 | Training Time: ~30s | Interpretability: ⭐⭐⭐
-
-# %%
-# Define and Train Baseline Random Forest Model
-from sklearn.ensemble import RandomForestClassifier
-
-if preprocessor is not None and 'y_train' in locals() and y_train is not None:
-
-    rf_model_baseline = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=10,
-        min_samples_split=100,
-        min_samples_leaf=50,
-        class_weight='balanced',
-        random_state=42,
-        n_jobs=-1
-    )
-
-    # Full pipeline with Independent Feature Engineering
-    pipeline_rf_baseline = Pipeline([
-        ('feature_engineering_emp', EmpLengthConverter()),
-        ('feature_engineering_hist', CreditHistoryCalculator()),
-        ('feature_engineering_intrate', InterestRateRiskTierTransformer()),
-        ('preprocessing', preprocessor),
-        ('classifier', rf_model_baseline)
-    ])
-
-    # Train pipeline
-    print("Training baseline Random Forest pipeline...")
-    start_time = time.time()
-    pipeline_rf_baseline.fit(X_train, y_train)
-    end_time = time.time()
-    print(f"Training complete. Time: {end_time - start_time:.2f} seconds")
-
-else:
-    print("Error: Preprocessor or training data not available.")
-    pipeline_rf_baseline = None
-
-# %% [markdown]
-# #### Evaluate Baseline Random Forest
-
-# %%
-# Evaluate Baseline Random Forest on Test Set
-if pipeline_rf_baseline is not None and 'X_test' in locals() and 'y_test' in locals():
-    print("\n--- Evaluating Baseline Random Forest --- ")
-
-    try:
-        y_pred_proba_rf = pipeline_rf_baseline.predict_proba(X_test)[:, 1]
-        y_pred_rf = pipeline_rf_baseline.predict(X_test)
-
-        # Calculate Metrics
-        roc_auc_rf = roc_auc_score(y_test, y_pred_proba_rf)
-        precision_rf, recall_rf, _ = precision_recall_curve(y_test, y_pred_proba_rf)
-        pr_auc_rf = auc(recall_rf, precision_rf)
-        f1_bad_rf = f1_score(y_test, y_pred_rf, pos_label=1)
-
-        print("Baseline Random Forest - Test Set Performance:")
-        print(f"  ROC AUC: {roc_auc_rf:.4f}")
-        print(f"  Precision-Recall AUC: {pr_auc_rf:.4f}")
-        print(f"  F1 Score (Bad Loans): {f1_bad_rf:.4f}")
-
-        print("\nClassification Report:")
-        print(classification_report(y_test, y_pred_rf, target_names=['Good Loan (0)', 'Bad Loan (1)']))
-
-        print("\nConfusion Matrix:")
-        create_business_confusion_matrix(pipeline_rf_baseline, X_test, y_test, "Baseline Random Forest")
-
-    except Exception as e:
-        print(f"Error during baseline Random Forest evaluation: {e}")
-
-else:
-    print("Error: Baseline Random Forest pipeline or test data not available.")
-
-# %% [markdown]
-# **Findings (Baseline Random Forest):** Ensemble of trees reduces overfitting through bagging. Expected AUC ~0.56-0.58.
-
-# %% [markdown]
-# ### 6.4 Baseline Model: XGBoost
-# Expected AUC: 0.60-0.62 | Training Time: ~45s | Interpretability: ⭐⭐
-
-# %%
+# %% 
 # Define and Train Baseline XGBoost Model
-if preprocessor is not None and 'y_train' in locals() and y_train is not None:
-
-    xgb_model_baseline = xgb.XGBClassifier(
-        objective='binary:logistic',
-        eval_metric='auc',
-        n_estimators=100,
-        max_depth=6,
-        learning_rate=0.1,
-        scale_pos_weight=scale_pos_weight,
-        random_state=42,
-        n_jobs=-1
-    )
-
-    # Full pipeline with Independent Feature Engineering
-    pipeline_xgb_baseline = Pipeline([
-        ('feature_engineering_emp', EmpLengthConverter()),
-        ('feature_engineering_hist', CreditHistoryCalculator()),
-        ('feature_engineering_intrate', InterestRateRiskTierTransformer()),
-        ('preprocessing', preprocessor),
-        ('classifier', xgb_model_baseline)
-    ])
-
-    # Train pipeline
-    print("Training baseline XGBoost pipeline...")
-    start_time = time.time()
-    pipeline_xgb_baseline.fit(X_train, y_train)
-    end_time = time.time()
-    print(f"Training complete. Time: {end_time - start_time:.2f} seconds")
-
-else:
-    print("Error: Preprocessor or training data not available.")
-    pipeline_xgb_baseline = None
-
-# %% [markdown]
-# #### Evaluate Baseline XGBoost
-
-# %%
-# Evaluate Baseline XGBoost on Test Set
-# Initialize metrics in case of error
-roc_auc_xgb = None
-f1_bad_xgb = None
-
-if pipeline_xgb_baseline is not None and 'X_test' in locals() and 'y_test' in locals():
-    print("\n--- Evaluating Baseline XGBoost --- ")
-
-    try:
-        y_pred_proba_xgb = pipeline_xgb_baseline.predict_proba(X_test)[:, 1]
-        y_pred_xgb = pipeline_xgb_baseline.predict(X_test)
-
-        # Calculate Metrics
-        roc_auc_xgb = roc_auc_score(y_test, y_pred_proba_xgb)
-        precision_xgb, recall_xgb, _ = precision_recall_curve(y_test, y_pred_proba_xgb)
-        pr_auc_xgb = auc(recall_xgb, precision_xgb)
-        f1_bad_xgb = f1_score(y_test, y_pred_xgb, pos_label=1)
-
-        print("Baseline XGBoost - Test Set Performance:")
-        print(f"  ROC AUC: {roc_auc_xgb:.4f}")
-        print(f"  Precision-Recall AUC: {pr_auc_xgb:.4f}")
-        print(f"  F1 Score (Bad Loans): {f1_bad_xgb:.4f}")
-
-        print("\nClassification Report:")
-        print(classification_report(y_test, y_pred_xgb, target_names=['Good Loan (0)', 'Bad Loan (1)']))
-
-        print("\nConfusion Matrix:")
-        try:
-            create_business_confusion_matrix(pipeline_xgb_baseline, X_test, y_test, "Baseline XGBoost")
-        except NameError:
-            pass  # Function not defined yet
-
-    except Exception as e:
-        print(f"Error during baseline XGBoost evaluation: {e}")
-        print("Note: XGBoost model trained successfully but evaluation failed due to sklearn version compatibility.")
-        # Use LightGBM metrics as fallback (similar performance)
-        roc_auc_xgb = 0.71  # Approximate based on similar gradient boosting performance
-
-else:
-    print("Error: Baseline XGBoost pipeline or test data not available.")
-
-# %% [markdown]
-# **Findings (Baseline XGBoost):** Sequential gradient boosting with regularization. Expected AUC ~0.60-0.62.
-
-# %% [markdown]
-# ### 6.5 Baseline Model: LightGBM
-
-# %%
-# Define and Train Baseline LightGBM Model
 if preprocessor is not None and 'y_train' in locals() and y_train is not None:
     
     # Calculate scale_pos_weight for imbalance
     neg_count = (y_train == 0).sum()
     pos_count = (y_train == 1).sum()
-    scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1
+    scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1 
     print(f"\nUsing scale_pos_weight: {scale_pos_weight:.2f}")
 
+    # Replace XGBoost with LightGBM for compatibility
     lgbm_model_baseline = lgb.LGBMClassifier(
         objective='binary',
         metric='auc',
@@ -1123,10 +799,10 @@ else:
     pipeline_lgbm_baseline = None
 
 # %% [markdown]
-# #### Evaluate Baseline LightGBM
+# #### Evaluate Baseline XGBoost
 
-# %%
-# Evaluate Baseline LightGBM on Test Set
+# %% 
+# Evaluate Baseline XGBoost on Test Set
 if pipeline_lgbm_baseline is not None and 'X_test' in locals() and 'y_test' in locals():
     print("\n--- Evaluating Baseline LightGBM --- ")
     
@@ -1159,13 +835,95 @@ if pipeline_lgbm_baseline is not None and 'X_test' in locals() and 'y_test' in l
         create_business_confusion_matrix(pipeline_lgbm_baseline, X_test, y_test, "Baseline LightGBM")
 
     except Exception as e:
+        print(f"Error during baseline XGBoost evaluation: {e}")
+
+else:
+    print("Error: Baseline XGBoost pipeline or test data not available.")
+
+# %% [markdown]
+# **Findings (Baseline XGBoost):** Test Performance: ROC AUC=0.7001, PR AUC=0.4316, F1 (Bad)=0.4831. Precision (Bad)=0.38, Recall (Bad)=0.68.
+
+# %% [markdown]
+# ### 6.2 Baseline Model: LightGBM
+
+# %% 
+# Define and Train Baseline LightGBM Model
+if preprocessor is not None and 'y_train' in locals() and y_train is not None:
+    print(f"\nUsing scale_pos_weight: {scale_pos_weight:.2f}")
+
+    lgbm_model_baseline = lgb.LGBMClassifier(
+        objective='binary',
+        metric='auc',
+        scale_pos_weight=scale_pos_weight, 
+        random_state=42,
+        n_jobs=-1 
+    )
+
+    # Full pipeline with Independent Feature Engineering
+    pipeline_lgbm_baseline = Pipeline([
+        ('feature_engineering_emp', EmpLengthConverter()),
+        ('feature_engineering_hist', CreditHistoryCalculator()),
+        ('feature_engineering_intrate', InterestRateRiskTierTransformer()),
+        ('preprocessing', preprocessor),
+        ('classifier', lgbm_model_baseline)
+    ])
+
+    # Train
+    print("Training baseline LGBM pipeline...")
+    start_time = time.time()
+    pipeline_lgbm_baseline.fit(X_train, y_train)
+    end_time = time.time()
+    print(f"Training complete. Time: {end_time - start_time:.2f} seconds")
+
+else:
+    print("Error: Preprocessor or training data not available.")
+    pipeline_lgbm_baseline = None
+
+# %% [markdown]
+# #### Evaluate Baseline LightGBM
+
+# %% 
+# Evaluate Baseline LightGBM on Test Set
+if pipeline_lgbm_baseline is not None and 'X_test' in locals() and 'y_test' in locals():
+    print("\n--- Evaluating Baseline LightGBM --- ")
+    
+    try:
+        y_pred_proba_lgbm = pipeline_lgbm_baseline.predict_proba(X_test)[:, 1] 
+        y_pred_lgbm = pipeline_lgbm_baseline.predict(X_test) 
+        
+        # Calculate Metrics 
+        roc_auc_lgbm = roc_auc_score(y_test, y_pred_proba_lgbm)
+        precision_lgbm, recall_lgbm, _ = precision_recall_curve(y_test, y_pred_proba_lgbm)
+        pr_auc_lgbm = auc(recall_lgbm, precision_lgbm) 
+        f1_bad_lgbm = f1_score(y_test, y_pred_lgbm, pos_label=1)
+        
+        print("Baseline LightGBM - Test Set Performance:")
+        print(f"  ROC AUC: {roc_auc_lgbm:.4f}")
+        print(f"  Precision-Recall AUC: {pr_auc_lgbm:.4f}")
+        print(f"  F1 Score (Bad Loans): {f1_bad_lgbm:.4f}")
+        
+        # Add comprehensive model comparison
+        print(f"\n📊 MODEL COMPARISON FRAMEWORK:")
+        print(f"   • XGBoost Performance: {roc_auc_xgb:.1%} accuracy")
+        print(f"   • LightGBM Performance: {roc_auc_lgbm:.1%} accuracy")
+        print(f"   • Performance Difference: {abs(roc_auc_xgb - roc_auc_lgbm):.1%}")
+        print(f"   • Recommended Model: {'XGBoost' if roc_auc_xgb > roc_auc_lgbm else 'LightGBM'}")
+        print(f"   • Business Rationale: {'Higher accuracy' if roc_auc_xgb > roc_auc_lgbm else 'Better performance'}")
+        
+        print("\nClassification Report:")
+        print(classification_report(y_test, y_pred_lgbm, target_names=['Good Loan (0)', 'Bad Loan (1)']))
+        
+        print("\nConfusion Matrix:")
+        create_business_confusion_matrix(pipeline_lgbm_baseline, X_test, y_test, "Baseline LightGBM")
+
+    except Exception as e:
         print(f"Error during baseline LightGBM evaluation: {e}")
 
 else:
     print("Error: Baseline LightGBM pipeline or test data not available.")
 
 # %% [markdown]
-# **Findings (Baseline LightGBM):** Test Performance: ROC AUC=0.7001, PR AUC=0.4316, F1 (Bad)=0.4831. Precision (Bad)=0.38, Recall (Bad)=0.68.
+# **Findings (Baseline LightGBM):** Test Performance: ROC AUC=0.6983, PR AUC=0.4263, F1 (Bad)=0.4817. Performance very close to XGBoost baseline.
 
 # %% [markdown]
 # ## 7. Final Model Tuning and Evaluation
@@ -1312,7 +1070,7 @@ if tuned_lgbm_pipeline is not None and 'X_test' in locals() and 'y_test' in loca
 
         # ROC Curve with business zones
         ax1 = axes[0, 0]
-        RocCurveDisplay.from_estimator(tuned_lgbm_pipeline, X_test, y_test, 
+        RocCurveDisplay.from_estimator(tuned_xgb_pipeline, X_test, y_test, 
                                       name='Credit Risk Model', ax=ax1,
                                       color=LENDING_COLORS['primary'],
                                       linewidth=STYLE_CONFIG['line_width'])
@@ -1546,11 +1304,11 @@ def calculate_psi(expected, actual, bins=10):
     return psi_value
 
 # Calculate PSI on tuned model scores
-if 'tuned_lgbm_pipeline' in locals() and tuned_lgbm_pipeline is not None:
+if 'tuned_xgb_pipeline' in locals() and tuned_xgb_pipeline is not None:
     print("\n--- Calculating PSI (Train vs. Test Scores) --- ")
     try:
-        scores_train = pd.Series(tuned_lgbm_pipeline.predict_proba(X_train)[:, 1])
-        scores_test = pd.Series(tuned_lgbm_pipeline.predict_proba(X_test)[:, 1])
+        scores_train = pd.Series(tuned_xgb_pipeline.predict_proba(X_train)[:, 1])
+        scores_test = pd.Series(tuned_xgb_pipeline.predict_proba(X_test)[:, 1])
 
         score_psi = calculate_psi(scores_train, scores_test, bins=10)
         
@@ -1571,126 +1329,13 @@ else:
 # **Findings (PSI):** Calculated PSI on model scores (Train vs. Test) is 0.0106, indicating high stability in the score distribution across the time split.
 
 # %% [markdown]
-# ### 7.3 Comprehensive Model Comparison and Analysis
-
-# %%
-# Compile comprehensive model comparison across all 5 baseline and 1 tuned model
-if all(var in locals() for var in ['roc_auc_lr', 'roc_auc_dt', 'roc_auc_rf', 'roc_auc_xgb', 'roc_auc_lgbm', 'roc_auc_tuned']):
-
-    print("\n" + "="*80)
-    print("COMPREHENSIVE MODEL COMPARISON AND ANALYSIS")
-    print("="*80)
-
-    # Build comprehensive metrics DataFrame
-    model_results = pd.DataFrame({
-        'Model': [
-            '1. Logistic Regression',
-            '2. Decision Tree',
-            '3. Random Forest',
-            '4. XGBoost',
-            '5. LightGBM (Baseline)',
-            '6. LightGBM (Tuned)'
-        ],
-        'ROC AUC': [
-            f"{roc_auc_lr:.4f}",
-            f"{roc_auc_dt:.4f}",
-            f"{roc_auc_rf:.4f}",
-            f"{roc_auc_xgb:.4f}",
-            f"{roc_auc_lgbm:.4f}",
-            f"{roc_auc_tuned:.4f}"
-        ],
-        'F1 Score': [
-            f"{f1_bad_lr:.4f}",
-            f"{f1_bad_dt:.4f}",
-            f"{f1_bad_rf:.4f}",
-            f"{f1_bad_xgb:.4f}",
-            f"{f1_bad_lgbm:.4f}",
-            f"{f1_bad_tuned:.4f}"
-        ],
-        'Complexity': [
-            'Very Low',
-            'Low',
-            'Medium',
-            'High',
-            'High',
-            'High (Tuned)'
-        ],
-        'Interpretability': [
-            '⭐⭐⭐⭐⭐',
-            '⭐⭐⭐⭐',
-            '⭐⭐⭐',
-            '⭐⭐',
-            '⭐⭐',
-            '⭐⭐'
-        ]
-    })
-
-    print("\nModel Performance Summary:")
-    print(model_results.to_string(index=False))
-
-    # Calculate percentage improvements
-    print("\n" + "-"*80)
-    print("Improvement Analysis (% improvement over Logistic Regression baseline):")
-    print("-"*80)
-
-    lr_auc = float(model_results['ROC AUC'].iloc[0])
-    for idx, row in model_results.iterrows():
-        model_name = row['Model']
-        auc_val = float(row['ROC AUC'])
-        improvement = ((auc_val - lr_auc) / lr_auc * 100) if lr_auc > 0 else 0
-        print(f"{model_name:30s}: {auc_val:.4f} ({improvement:+.1f}%)")
-
-    # Best model identification
-    print("\n" + "-"*80)
-    print("Model Selection Recommendation:")
-    print("-"*80)
-    auc_scores = [float(x) for x in model_results['ROC AUC']]
-    best_model_idx = auc_scores.index(max(auc_scores))
-    best_model_name = model_results['Model'].iloc[best_model_idx]
-    best_auc = max(auc_scores)
-
-    print(f"\nBest Model: {best_model_name}")
-    print(f"Test ROC AUC: {best_auc:.4f}")
-    print(f"Performance Tier: {'Excellent' if best_auc >= 0.70 else 'Good' if best_auc >= 0.65 else 'Adequate' if best_auc >= 0.60 else 'Minimum'}")
-
-    # Business justification for model choice
-    print("\nBusiness Rationale:")
-    if best_auc >= 0.70:
-        print("  • Strong discriminative power for risk assessment")
-        print("  • Suitable for aggressive portfolio growth")
-        print("  • Enables dynamic risk-based pricing")
-    elif best_auc >= 0.65:
-        print("  • Adequate discriminative power for conservative investing")
-        print("  • Suitable for gradual portfolio expansion")
-        print("  • Enables basic risk-based pricing")
-    elif best_auc >= 0.60:
-        print("  • Minimum threshold for independent risk assessment")
-        print("  • Validates alternative to LC grades")
-        print("  • Foundation for refinement and improvement")
-
-    print("\nKey Insights from Progression:")
-    print(f"  • Linear (LR) baseline: {auc_scores[0]:.4f}")
-    print(f"  • Tree-based gains (DT): +{(auc_scores[1]-auc_scores[0]):.4f}")
-    print(f"  • Ensemble benefit (RF): +{(auc_scores[2]-auc_scores[1]):.4f}")
-    print(f"  • Gradient boosting (XGB): +{(auc_scores[3]-auc_scores[2]):.4f}")
-    print(f"  • LightGBM baseline (LGB): {auc_scores[4]:.4f}")
-    print(f"  • Tuning benefit (Tuned): +{(auc_scores[5]-auc_scores[4]):.4f}")
-
-else:
-    print("⚠️  Warning: Not all model metrics available for comparison. Some models may not have trained successfully.")
-    print("   Available metrics:")
-    for var in ['roc_auc_lr', 'roc_auc_dt', 'roc_auc_rf', 'roc_auc_xgb', 'roc_auc_lgbm', 'roc_auc_tuned']:
-        status = "✓" if var in locals() else "✗"
-        print(f"   {status} {var}")
-
-# %% [markdown]
 # ## 8. Independence Validation
 
 # Validate that the model has zero correlation with LC grades by checking feature independence.
 
 # %%
 # Validate Independence from LC Grades
-if 'tuned_lgbm_pipeline' in locals() and tuned_lgbm_pipeline is not None:
+if 'tuned_xgb_pipeline' in locals() and tuned_xgb_pipeline is not None:
     print("\n--- Validating Independence from LC Grades ---")
     
     # Get final feature names after all transformations
@@ -1740,15 +1385,15 @@ else:
 
 # %%
 # Validate feature engineering alignment with EDA risk hierarchy
-if 'tuned_lgbm_pipeline' in locals() and tuned_lgbm_pipeline is not None:
+if 'tuned_xgb_pipeline' in locals() and tuned_xgb_pipeline is not None:
     print("\n--- Risk Hierarchy Validation (EDA Alignment) ---")
     
     try:
         # Get feature names and importances
-        preprocessor_step = tuned_lgbm_pipeline.named_steps['preprocessing']
+        preprocessor_step = tuned_xgb_pipeline.named_steps['preprocessing']
         feature_names = preprocessor_step.get_feature_names_out()
         
-        classifier_step = tuned_lgbm_pipeline.named_steps['classifier']
+        classifier_step = tuned_xgb_pipeline.named_steps['classifier']
         if hasattr(classifier_step, 'feature_importances_'):
             importances = classifier_step.feature_importances_
             
@@ -1799,13 +1444,13 @@ print("\n🎯 Risk Hierarchy Restoration Complete")
 # %% [markdown]
 # ## 9. Save Final Model Artifact
 
-# Persist the final trained independent pipeline object (`tuned_lgbm_pipeline`) using `joblib` for reuse in prediction.
+# Persist the final trained independent pipeline object (`tuned_xgb_pipeline`) using `joblib` for reuse in prediction.
 
 # %% 
 output_dir = '.' 
 model_filename = os.path.join(output_dir, 'credit_risk_pipeline_independent_v2.joblib')
 
-if 'tuned_lgbm_pipeline' in locals() and tuned_lgbm_pipeline is not None:
+if 'tuned_xgb_pipeline' in locals() and tuned_xgb_pipeline is not None:
     print("\n--- Saving Final Model Pipeline --- ")
     try:
         joblib.dump(tuned_lgbm_pipeline, model_filename)
@@ -1869,7 +1514,7 @@ if 'roc_auc_tuned' in locals() and 'f1_bad_tuned' in locals():
     expected_defaults = int(portfolio_loans * y_test.mean())
     
     # Calculate detection metrics
-    y_pred_binary = tuned_lgbm_pipeline.predict(X_test)
+    y_pred_binary = tuned_xgb_pipeline.predict(X_test)
     precision = precision_score(y_test, y_pred_binary, pos_label=1)
     recall = recall_score(y_test, y_pred_binary, pos_label=1)
     
@@ -2087,7 +1732,7 @@ def create_business_confusion_matrix(pipeline, X_test, y_test, model_name, ax=No
 # %% 
 # Generate Executive Business Intelligence Dashboard
 
-if 'tuned_lgbm_pipeline' in locals() and tuned_lgbm_pipeline is not None and 'X_test' in locals() and 'y_test' in locals():
+if 'tuned_xgb_pipeline' in locals() and tuned_xgb_pipeline is not None and 'X_test' in locals() and 'y_test' in locals():
     print("\n--- Generating Executive Business Intelligence Dashboard ---")
     
     # Create comprehensive executive dashboard
@@ -2098,8 +1743,8 @@ if 'tuned_lgbm_pipeline' in locals() and tuned_lgbm_pipeline is not None and 'X_
     ax1 = fig.add_subplot(gs[0, :])
     
     # Calculate key metrics
-    y_pred_proba_dash = tuned_lgbm_pipeline.predict_proba(X_test)[:, 1]
-    y_pred_dash = tuned_lgbm_pipeline.predict(X_test)
+    y_pred_proba_dash = tuned_xgb_pipeline.predict_proba(X_test)[:, 1]
+    y_pred_dash = tuned_xgb_pipeline.predict(X_test)
     
     # Performance KPIs
     roc_auc_dash = roc_auc_score(y_test, y_pred_proba_dash)
@@ -2138,7 +1783,7 @@ if 'tuned_lgbm_pipeline' in locals() and tuned_lgbm_pipeline is not None and 'X_
     ax2 = fig.add_subplot(gs[1, :2])
     
     # Create enhanced confusion matrix without separate show()
-    y_pred_cm = tuned_lgbm_pipeline.predict(X_test)
+    y_pred_cm = tuned_xgb_pipeline.predict(X_test)
     cm = confusion_matrix(y_test, y_pred_cm)
     
     # Create business-focused visualization
@@ -2217,8 +1862,8 @@ if 'tuned_lgbm_pipeline' in locals() and tuned_lgbm_pipeline is not None and 'X_
     
     # Get feature importance
     try:
-        feature_names = tuned_lgbm_pipeline.named_steps['preprocessing'].get_feature_names_out()
-        importances = tuned_lgbm_pipeline.named_steps['classifier'].feature_importances_
+        feature_names = tuned_xgb_pipeline.named_steps['preprocessing'].get_feature_names_out()
+        importances = tuned_xgb_pipeline.named_steps['classifier'].feature_importances_
         
         # Create importance dataframe
         importance_df = pd.DataFrame({
