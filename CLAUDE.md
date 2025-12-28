@@ -4,79 +4,102 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Investor Portfolio Management Model** - Predict LendingClub loan defaults to maximize investment returns.
+**LendingClub Loan Default Prediction** - Predict loan defaults from investor perspective.
 
-**Use Case:** Build an independent risk model to help investors select loans for their LC portfolio, without relying on LC's proprietary grade.
+**Use Case:** Build an independent risk model to help investors select loans, without relying on LC's proprietary grade.
 
-**Philosophy:** Focus on fundamentals, progressive model complexity, and honest metrics. This is a portfolio piece demonstrating data science skills, not production engineering.
+**Target Audience:** Junior data scientist portfolio demonstrating solid fundamentals.
+
+**Philosophy:** Simplicity, correctness, and data-driven decisions over sophistication.
 
 **Key Decision:** Keep interest rate and installment (investor features) while removing grade/sub_grade (circular reasoning).
 
+---
+
 ## Project Structure
 
-### Development Notebooks (dev/ directory in Python format)
-- **Purpose:** Work-in-progress notebooks in Python percent format (better git diffs)
-- **Files:**
-  - `dev/1_analytics.py`: EDA and data understanding
-  - `dev/2_Modelling.py`: Feature engineering, progressive model training (5 models)
-  - `dev/3_Deployment.py`: Simple prediction examples
+```
+1_EDA.py                 # Exploratory Data Analysis (Python percent format)
+2_Modeling.py            # Model training and evaluation (Python percent format)
+README.md                # Project overview and findings
+environment.yml          # Conda environment
+pipeline.joblib          # Final saved model
+data/
+  ├── accepted_2007_to_2018Q4.csv     # Full dataset (887K loans)
+  └── sample_applications.csv          # Sample for testing
+dev/
+  ├── archive/           # Previous complex implementation (reference)
+  └── docs/
+      └── notebook1_guide.md  # Detailed EDA checklist and structure
+```
 
-### Finalized Notebooks (Root directory in Jupyter format)
-- **Purpose:** Completed notebooks with outputs for portfolio viewing
-- **Files:**
-  - `1_analytics.ipynb`: EDA results (converted from dev/1_analytics.py)
-  - `2_Modelling.ipynb`: Model results (converted from dev/2_Modelling.py)
-  - `3_Deployment.ipynb`: Deployment demo (converted from dev/3_Deployment.py)
+---
 
-### Documentation (dev/docs/ directory)
-- `REFACTORING_PLAN.md`: High-level refactoring strategy
-- `00_Refactoring_Overview.md`: Why refactor (investor perspective, not circular reasoning)
-- `01_Use_Case_And_Features.md`: Why keep int_rate, why remove grade
-- `02_Feature_Engineering_Simplification.md`: Transformer selection rationale
-- `03_Workflow_Guide.md`: dev/ Python format workflow
-- `04_Model_Selection_Philosophy.md`: Progressive modeling approach (CS229)
+## Workflow
 
-### Source Code (`src/`)
-- `predictor.py`: Load pipeline and make predictions
-- `transformers.py`: Custom transformers (keep 3, remove 3)
-  - **Keep:** EmpLengthConverter, CreditHistoryCalculator, InterestRateRiskTierTransformer
-  - **Remove:** CountBinarizer, FICORiskTierTransformer, CreditUtilizationEnhancer
+### 1. Exploratory Data Analysis (1_EDA.py)
 
-### Data (`data/`)
-- `accepted_2007_to_2018Q4.csv`: Full dataset (887K loans)
-- `sample_applications.csv`: Sample for testing predictions
+Follow the structured approach in `dev/docs/notebook1_guide.md`:
 
-## Development Workflow
+- **Define target:** Binary classification (Charged Off vs Fully Paid), drop Current status
+- **Leakage audit:** Remove post-origination features (payments, recoveries, settlement, hardship fields)
+- **Missing values:** Simple rules (drop >50% missing, median impute numeric, "missing" impute categorical)
+- **Data type parsing:** Convert dates, strings ("10+ years" → numeric), ensure numeric columns are clean
+- **Univariate EDA:** Understand distributions for core features (FICO, DTI, annual_inc, loan_amnt, int_rate)
+- **Bivariate EDA:** Plot default rate by feature bins to inform modeling approach
+- **Time drift check:** Validate that time-based split (≤2015 train, ≥2016 test) is justified
 
-### Directory Structure
-- **dev/** - Development notebooks in Python percent format (.py files)
-  - Python format for better git diffs and version control
-  - Work-in-progress versions
-  - **docs/** - Documentation and design decisions
+**Output:** Cleaned dataset, validation of approach, EDA-backed hypotheses for modeling.
 
-- **Root Notebooks** - Finalized Jupyter notebooks (.ipynb)
-  - Converted from dev/ Python files
-  - Include executed outputs for portfolio viewing
-  - Professional presentation versions
+### 2. Model Training & Evaluation (2_Modeling.py)
 
-### Workflow: Edit → Test → Convert → Commit
-1. **Edit:** Make changes in `dev/*.py` files
-2. **Test:** Run `python dev/filename.py` or execute cells in IDE
-3. **Convert:** `jupyter nbconvert --to notebook dev/filename.py --output filename.ipynb`
-4. **Execute:** `jupyter nbconvert --execute --inplace filename.ipynb` (to generate outputs)
-5. **Commit:** `git add dev/*.py && git add *.ipynb` (both versions)
+Data-driven approach based on EDA findings:
 
-**Why Python format?**
-- Readable git diffs (no JSON metadata noise)
-- Better IDE support (syntax highlighting, linting)
-- Standard Python tooling works
-- Easier code review and version control
+- **Load cleaned data** from 1_EDA.py output
+- **Train/test split:** Time-based (train ≤2015, test ≥2016) to address concept drift
+- **Feature engineering:** sklearn only (StandardScaler, OneHotEncoder, simple numeric parsing)
+  - No custom transformers
+  - No excessive binning or derived features
+- **Model selection:** TBD based on EDA findings
+  - Start with Logistic Regression (baseline)
+  - Add complexity only if EDA supports it (e.g., if bivariate EDA shows nonlinear patterns)
+  - 2-3 models total (not 5)
+- **Evaluation:** ROC-AUC, PR-AUC, confusion matrix, feature coefficients
+- **Save pipeline:** joblib format for predictions
+
+### 3. Working with Python Percent Format (.py files)
+
+The project uses `.py` files with `%%` cell separators (Python percent format) for these advantages:
+
+```python
+# %% [markdown]
+# # Section Title
+# Markdown cells use # %% [markdown]
+
+# %%
+# Code cells use # %%
+import pandas as pd
+
+# %%
+# Another code cell
+data = pd.read_csv('data.csv')
+```
+
+**Advantages:**
+- Run directly: `python 1_EDA.py`
+- Better git diffs (no JSON metadata noise)
+- Standard IDE support (syntax highlighting, linting)
+- Can convert to .ipynb when needed: `jupyter nbconvert --to notebook 1_EDA.py`
+- Same format as archived reference files
+
+---
 
 ## Environment Setup
 
 This project uses a dedicated conda environment named `lending-club-ds`.
 
 ### Quick Setup
+
 ```bash
 # Create environment from environment.yml
 conda env create -f environment.yml
@@ -86,11 +109,12 @@ conda activate lending-club-ds
 ```
 
 ### Manual Setup
+
 ```bash
 # Create environment
 conda create -n lending-club-ds python=3.11 -y
 
-# Install core packages (14 essential)
+# Install core packages
 conda install -n lending-club-ds \
   numpy>=2.0.1 \
   pandas>=2.2.3 \
@@ -98,8 +122,6 @@ conda install -n lending-club-ds \
   scipy>=1.15.3 \
   matplotlib>=3.10.0 \
   seaborn>=0.13.2 \
-  xgboost>=2.1.2 \
-  lightgbm>=4.6.0 \
   jupyter>=1.1.1 \
   notebook>=7.4.4 \
   ipython>=9.1.0 \
@@ -112,126 +134,118 @@ conda install -n lending-club-ds \
 conda activate lending-club-ds
 ```
 
-### Key Dependencies (14 Essential Packages)
-- **Core**: numpy, pandas, scikit-learn, scipy
-- **ML**: xgboost, lightgbm (both for model comparison)
-- **Visualization**: matplotlib, seaborn
-- **Development**: jupyter, notebook, ipython, ipykernel
-- **Utilities**: joblib, python-dateutil
+### Key Dependencies
 
-## Key Features & Design Decisions
+- **Core:** numpy, pandas, scikit-learn, scipy
+- **Visualization:** matplotlib, seaborn
+- **Development:** jupyter, notebook, ipython, ipykernel
+- **Utilities:** joblib, python-dateutil
 
-### Feature Selection: Investor Perspective
+---
 
-**INCLUDE (Legitimate Investor Features):**
-- `int_rate` and `installment` - Published features when loan is listed
-- Applicant data - FICO, DTI, employment, credit history, etc.
+## Feature Selection Principle
 
-**EXCLUDE (Circular Reasoning):**
+### INCLUDE (Legitimate Investor Features)
+
+- `int_rate` and `installment` - Published investor-facing features at loan origination
+- Applicant data - FICO score, DTI, employment length, credit history, etc.
+
+### EXCLUDE (Circular Reasoning)
+
 - `grade` and `sub_grade` - LC's proprietary risk scores (using their prediction to make our own is circular)
+- Post-origination features - Payment history, recoveries, settlement, hardship fields (outcome signals, not predictors)
 
-See `dev/docs/01_Use_Case_And_Features.md` for detailed explanation.
+---
 
-### Custom Transformers (Keep 3, Remove 3)
+## Key Guidelines
 
-**KEEP (Domain-specific, unavailable in sklearn):**
-1. EmpLengthConverter - String to numeric ("10+ years" → 10)
-2. CreditHistoryCalculator - Date arithmetic (credit history in years)
-3. InterestRateRiskTierTransformer - Bins and flags for interest rate (legitimate feature)
+### 1. No Custom Transformers
+- Use only sklearn.preprocessing built-ins (StandardScaler, OneHotEncoder, Binarizer, etc.)
+- Parse messy strings (e.g., "10+ years", "36 months") with pandas before pipeline if needed
+- Keep it simple - demonstrate understanding of data, not engineering complexity
 
-**REMOVE (Over-engineered, can use sklearn):**
-1. CountBinarizer - Use sklearn.preprocessing.Binarizer
-2. FICORiskTierTransformer - Over-complicated (5 features from 1 input)
-3. CreditUtilizationEnhancer - Too many derived features (9 features from 2 inputs)
+### 2. Data-Driven Decisions
+- Model selection is TBD and informed by EDA findings
+- Don't plan 5 models upfront - let data guide you
+- If Logistic Regression explains the data well, that's the right choice
+- Only add complexity if EDA clearly supports it (nonlinear patterns, feature interactions)
 
-See `dev/docs/02_Feature_Engineering_Simplification.md` for rationale.
+### 3. Simple, Correct, Clear
+- Demonstration of fundamentals matters more than sophistication
+- Avoid over-engineering
+- Honest about feature dependencies (int_rate encodes LC's risk assessment)
+- Use correct terminology (ROC-AUC ≠ accuracy)
 
-### Model Progression (CS229 Approach)
+### 4. Time-Based Validation
+- Train on loans issued ≤2015, test on loans issued ≥2016
+- Addresses concept drift in lending data (risk profiles change over time)
+- Standard practice for temporal prediction problems
 
-Build 5 models of increasing complexity:
-1. **Logistic Regression** - Baseline (AUC ~0.53)
-2. **Decision Tree** - Non-linearity (AUC ~0.55)
-3. **Random Forest** - Ensemble stability (AUC ~0.57)
-4. **XGBoost** - Boosting (AUC ~0.61)
-5. **LightGBM** - Alternative boosting (AUC ~0.61)
+---
 
-Why this approach: Start simple, add complexity only when justified by empirical results.
+## Expected Outcomes
 
-See `dev/docs/04_Model_Selection_Philosophy.md` for full strategy.
+- **Size:** ~2 Python notebooks with %% separators (~1,000-1,500 lines total)
+- **Models:** 2-3 models (baseline + improvements based on EDA findings)
+- **Pipeline:** Clean, reproducible sklearn-only pipeline
+- **Runnable:** Can execute with `python 1_EDA.py` or use IDE with Jupyter extension
+- **Demonstrates:** Leakage awareness, time-based validation, data-driven modeling, honest feature dependencies
 
-### Making Predictions
-
-```python
-from src.predictor import CreditPredictor
-
-# Initialize predictor
-predictor = CreditPredictor(artifact_path='.')
-
-# Make predictions on raw input data
-probabilities = predictor.predict_proba(input_data)
-predictions = predictor.predict(input_data, threshold=0.5)
-```
+---
 
 ## Common Tasks
 
 ### Development
+
 ```bash
 # Activate environment
 conda activate lending-club-ds
 
-# Edit code in IDE
-code dev/2_Modelling.py  # or your preferred editor
+# Edit code
+code 1_EDA.py  # or your preferred editor
 
-# Test code
-python dev/2_Modelling.py
+# Run directly
+python 1_EDA.py
+
+# Run in IDE with Jupyter extension (Jupyter notebooks in VS Code, PyCharm, etc.)
+# The IDE will recognize %% cell separators
 ```
 
-### Conversion & Execution
+### Convert to Jupyter Notebook (Optional)
+
 ```bash
 # Convert Python percent format to Jupyter notebook
-jupyter nbconvert --to notebook dev/2_Modelling.py --output 2_Modelling.ipynb
+jupyter nbconvert --to notebook 1_EDA.py --output 1_EDA.ipynb
 
 # Execute notebook to generate outputs
-jupyter nbconvert --execute --inplace 2_Modelling.ipynb
+jupyter nbconvert --execute --inplace 1_EDA.ipynb
 ```
 
 ### Git Workflow
-```bash
-# Stage both versions
-git add dev/*.py          # Python development versions
-git add *.ipynb          # Jupyter presentation versions
-git add dev/docs/*.md    # Documentation
 
-# Commit
-git commit -m "refactor: Message explaining changes"
+```bash
+# Stage and commit
+git add 1_EDA.py 2_Modeling.py
+git add README.md environment.yml
+git commit -m "feat: Add EDA and modeling notebooks with findings"
 ```
 
-### View Results
-```bash
-# View finalized notebooks (with outputs)
-jupyter lab 2_Modelling.ipynb
-```
+---
 
-## Related Documentation
+## References
 
-See `dev/docs/` for detailed guides:
-- `00_Refactoring_Overview.md` - Project philosophy and changes
-- `01_Use_Case_And_Features.md` - Why include/exclude features
-- `02_Feature_Engineering_Simplification.md` - Transformer selection
-- `03_Workflow_Guide.md` - dev/ directory workflow
-- `04_Model_Selection_Philosophy.md` - Progressive modeling approach
-- `REFACTORING_PLAN.md` - Full refactoring timeline
+- **EDA Guidance:** See `dev/docs/notebook1_guide.md` for detailed 8-section checklist (target definition, leakage audit, missing values, data types, univariate, bivariate, time drift, conclusions)
+- **Data Dictionary:** Lending Club data dictionary CSV maps all columns to descriptions
+- **Previous Implementation:** `dev/archive/` contains reference from over-engineered approach (useful for understanding what NOT to do)
 
-## Expected Performance
+---
 
-**Investor Use Case Model:**
-- **AUC:** 0.60-0.625 (realistic for independent assessment)
-- **Features:** ~60 (no excessive binning/derivation)
-- **Models:** 5 (progressive complexity)
-- **Training Time:** <2 minutes (all 5 models)
+## Summary
 
-This is respectable performance for a portfolio piece demonstrating:
-✅ Proper feature selection (no circular reasoning)
-✅ Understanding of data leakage and timing
-✅ Clear business context (investor perspective)
-✅ Progressive model complexity (CS229 philosophy)
+This is a **junior data scientist portfolio piece** demonstrating:
+
+✅ Proper feature selection (no circular reasoning with LC's grades)
+✅ Understanding of data leakage (no post-origination features)
+✅ Time-based validation (concept drift awareness)
+✅ Data-driven modeling (model selection from EDA, not assumptions)
+✅ Clear communication (code is readable, decisions are documented)
