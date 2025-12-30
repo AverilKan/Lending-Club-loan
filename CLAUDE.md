@@ -98,6 +98,16 @@ data = pd.read_csv('data.csv')
 
 This project uses a dedicated conda environment named `lending-club-ds`.
 
+**⚠️ IMPORTANT:** Always activate this environment before running any code:
+```bash
+conda activate lending-club-ds
+```
+
+The environment includes XGBoost 2.1.2 for gradient boosting models. Verify it's available:
+```bash
+python -c "import xgboost; print(f'XGBoost {xgboost.__version__} ready')"
+```
+
 ### Quick Setup
 
 ```bash
@@ -140,6 +150,7 @@ conda activate lending-club-ds
 - **Visualization:** matplotlib, seaborn
 - **Development:** jupyter, notebook, ipython, ipykernel
 - **Utilities:** joblib, python-dateutil
+- **Modeling:** xgboost (for gradient boosting)
 
 ---
 
@@ -198,13 +209,16 @@ conda activate lending-club-ds
 ### Development
 
 ```bash
-# Activate environment
+# IMPORTANT: Always activate conda environment first
 conda activate lending-club-ds
+
+# Verify XGBoost is available
+python -c "import xgboost; print(f'XGBoost {xgboost.__version__} ready')"
 
 # Edit code
 code 1_EDA.py  # or your preferred editor
 
-# Run directly
+# Run directly (from lending-club-ds environment)
 python 1_EDA.py
 
 # Run in IDE with Jupyter extension (Jupyter notebooks in VS Code, PyCharm, etc.)
