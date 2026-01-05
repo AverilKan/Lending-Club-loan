@@ -1,198 +1,259 @@
 """
-Contains the predictor class for the credit risk model.
-Encapsulates loading the model pipeline and making predictions.
+Production predictor for Lending Club default risk model.
+
+Loads saved model artifacts and provides convenient methods for predictions.
+All custom transformers are imported to enable joblib unpickling.
 """
 
 import os
 import joblib
-# import pickle # No longer needed for feature list
 import pandas as pd
 import numpy as np
-# Need to import custom transformers so joblib can find their definitions
-from src.transformers import EmpLengthConverter, CreditHistoryCalculator, InterestRateRiskTierTransformer
+from pathlib import Path
 
-# Define default artifact filenames (should match saving step in notebook)
-DEFAULT_MODEL_FILENAME = 'credit_risk_pipeline_v1.joblib'
-# DEFAULT_FEATURES_FILENAME = 'credit_risk_features_v1.pkl' # Feature list no longer loaded here
+# Import custom transformers so joblib can find their definitions when unpickling
+from src.transformers import (
+    RawLendingClubCleaner,
+    MissingnessDropper,
+    Capper,
+    ColumnAligner
+)
 
-def load_model_artifacts(artifact_path='.'):
-    """Loads the pipeline artifact."""
-    model_file = os.path.join(artifact_path, DEFAULT_MODEL_FILENAME)
-    
-    print(f"Loading pipeline from: {model_file}")
-    pipeline = joblib.load(model_file)
-    print("Pipeline loaded successfully.")
-    
-    # print(f"Loading feature list from: {features_file}") # Removed
-    # with open(features_file, 'rb') as f: # Removed
-    #     features = pickle.load(f) # Removed
-    # print("Feature list loaded successfully.") # Removed
-    
-    # return pipeline, features # Return only pipeline
-    return pipeline
+# Default artifact filename (matches saving step in Notebook 2)
+DEFAULT_ARTIFACT_FILENAME = "credit_risk_pipeline_investor.joblib"
 
-class CreditPredictor:
+
+class CreditRiskPredictor:
     """
-    Manages loading the credit risk model pipeline and making predictions.
-    Assumes the loaded pipeline handles all necessary preprocessing and feature engineering.
+    Production-ready wrapper for Lending Club default risk prediction.
+
+    Loads a saved model artifact and provides convenient methods for:
+    - Getting default probabilities
+    - Making binary predictions
+    - Detailed prediction results with decisions
+
+    The artifact contains:
+    - pipeline: Full sklearn pipeline (preprocessing + model), fitted on TRAIN+VAL
+    - threshold: F2-optimized threshold selected on validation data
+    - metadata: Training details, performance metrics, creation timestamp
+
+    Usage:
+        predictor = CreditRiskPredictor.from_artifact("path/to/artifact.joblib")
+        proba = predictor.predict_proba(df_new_applications)
+        decisions = predictor.predict(df_new_applications)
     """
-    def __init__(self, artifact_path='.'):
-        """
-        Initializes the predictor by loading the pipeline.
 
-        Args:
-            artifact_path (str): Path to the directory containing model artifacts.
+    def __init__(self, pipeline, threshold, metadata):
         """
-        self.pipeline = None
-        # self.features = None # Feature list no longer stored in predictor
-        self.artifact_path = artifact_path
-        try:
-            # self.pipeline, self.features = load_model_artifacts(self.artifact_path) # Load only pipeline
-            self.pipeline = load_model_artifacts(self.artifact_path)
-            print(f"CreditPredictor initialized with pipeline.")
-            # print(f"CreditPredictor initialized. Expecting {len(self.features)} features.") # Removed feature count log
-        except FileNotFoundError:
-            print(f"Error: Model artifact not found in {self.artifact_path}. "
-                  f"Expected \'{DEFAULT_MODEL_FILENAME}\'.")
-            # Depending on use case, might want to raise an error here
-        except Exception as e:
-            print(f"Error initializing CreditPredictor: {e}")
-            # Depending on use case, might want to raise an error here
+        Initialize predictor with pipeline and threshold.
 
-    def predict_proba(self, input_data):
+        Parameters:
+        -----------
+        pipeline : sklearn.pipeline.Pipeline
+            Fitted preprocessing + model pipeline
+        threshold : float
+            Decision threshold for binary classification (0-1)
+        metadata : dict
+            Model metadata (training date, performance, etc.)
         """
-        Generates prediction probabilities for the input data.
-        Assumes the loaded pipeline handles all preprocessing.
+        self.pipeline = pipeline
+        self.threshold = threshold
+        self.metadata = metadata
 
-        Args:
-            input_data (pd.DataFrame or list[dict]): Raw input data for prediction.
-                                                   Must contain columns expected by the start of the pipeline.
+    @classmethod
+    def from_artifact(cls, artifact_path):
+        """Load predictor from saved joblib artifact.
+
+        Parameters:
+        -----------
+        artifact_path : str or Path
+            Path to saved .joblib artifact file
 
         Returns:
-            np.array: Array of probabilities for the positive class (is_bad=1).
-                      Returns None if predictor is not initialized or input is invalid/pipeline fails.
+        --------
+        CreditRiskPredictor
+            Initialized predictor ready for inference
         """
-        # if self.pipeline is None or self.features is None: # Check only pipeline
-        if self.pipeline is None:
-            print("Error: Predictor pipeline not initialized. Cannot predict.")
-            return None
+        artifact_path = Path(artifact_path)
+        if not artifact_path.exists():
+            raise FileNotFoundError(f"Artifact not found at {artifact_path}")
 
-        try:
-            if isinstance(input_data, list):
-                input_df = pd.DataFrame(input_data)
-            elif isinstance(input_data, pd.DataFrame):
-                input_df = input_data.copy()
-            else:
-                raise ValueError("Input data must be a pandas DataFrame or a list of dictionaries.")
+        artifact = joblib.load(artifact_path)
+        return cls(
+            pipeline=artifact["pipeline"],
+            threshold=artifact["threshold"],
+            metadata=artifact["metadata"]
+        )
 
-            print(f"Received {input_df.shape[0]} records for prediction.")
-            print("Input DataFrame columns:", input_df.columns.tolist()) # DEBUG
-            print("Input DataFrame dtypes:\n", input_df.dtypes) # DEBUG
+    @classmethod
+    def from_default_location(cls, search_paths=None):
+        """Load predictor from default artifact location.
 
+        Searches for the default artifact filename in multiple locations.
 
-            # --- Prediction ---
-            # The pipeline handles FE, imputation, scaling, encoding, and prediction
-            probabilities = self.pipeline.predict_proba(input_df) # Pass raw DataFrame
-
-            # Return probability of the positive class (usually index 1)
-            positive_class_proba = probabilities[:, 1]
-            print("Prediction probabilities generated.")
-
-            return positive_class_proba
-
-        except KeyError as e:
-             print(f"Error during prediction: Missing expected raw feature column: {e}")
-             return None
-        except Exception as e:
-            print(f"Error during prediction: {e}")
-            return None
-
-    def predict(self, input_data, threshold=0.5):
-        """
-        Generates binary class predictions (0 or 1).
-
-        Args:
-            input_data (pd.DataFrame or list[dict]): Raw input data.
-            threshold (float): Probability threshold for classifying as positive (1).
+        Parameters:
+        -----------
+        search_paths : list[str], optional
+            Paths to search for artifact. Defaults to ['.', './models', project_root/models]
 
         Returns:
-            np.array: Array of binary predictions (0 or 1). Returns None on error.
+        --------
+        CreditRiskPredictor
+            Initialized predictor ready for inference
         """
-        probabilities = self.predict_proba(input_data)
-        if probabilities is None:
-            return None
+        if search_paths is None:
+            search_paths = [
+                Path.cwd() / "models",
+                Path.cwd() / DEFAULT_ARTIFACT_FILENAME,
+                Path.home() / ".lending-club" / DEFAULT_ARTIFACT_FILENAME,
+            ]
 
-        return (probabilities >= threshold).astype(int)
+        for search_path in search_paths:
+            artifact_path = Path(search_path) / DEFAULT_ARTIFACT_FILENAME if Path(search_path).is_dir() else Path(search_path)
+            if artifact_path.exists():
+                return cls.from_artifact(artifact_path)
+
+        raise FileNotFoundError(
+            f"Could not find {DEFAULT_ARTIFACT_FILENAME} in any of: {search_paths}"
+        )
+
+    def predict_proba(self, X):
+        """Return default probability predictions (0-1).
+
+        Parameters:
+        -----------
+        X : pd.DataFrame or list[dict]
+            Raw loan application data
+
+        Returns:
+        --------
+        np.ndarray
+            Default probabilities for each application
+        """
+        if isinstance(X, list):
+            X = pd.DataFrame(X)
+        elif not isinstance(X, pd.DataFrame):
+            raise ValueError("Input data must be a DataFrame or list of dicts")
+
+        return self.pipeline.predict_proba(X)[:, 1]
+
+    def predict(self, X):
+        """Return binary default predictions (0=approve, 1=reject).
+
+        Parameters:
+        -----------
+        X : pd.DataFrame or list[dict]
+            Raw loan application data
+
+        Returns:
+        --------
+        np.ndarray
+            Binary predictions (0 or 1)
+        """
+        proba = self.predict_proba(X)
+        return (proba >= self.threshold).astype(int)
+
+    def predict_with_details(self, X):
+        """Return DataFrame with probabilities, predictions, and decisions.
+
+        Parameters:
+        -----------
+        X : pd.DataFrame or list[dict]
+            Raw loan application data
+
+        Returns:
+        --------
+        pd.DataFrame
+            Results with columns:
+            - default_probability: predicted probability (0-1)
+            - predicted_default: binary prediction (0 or 1)
+            - decision: human-readable decision (APPROVE or REJECT)
+        """
+        proba = self.predict_proba(X)
+        pred = self.predict(X)
+
+        return pd.DataFrame({
+            "default_probability": proba,
+            "predicted_default": pred,
+            "decision": ["REJECT" if p == 1 else "APPROVE" for p in pred]
+        })
+
+    def get_metadata(self):
+        """Return model metadata (training date, performance, etc.)."""
+        return self.metadata
+
+    def get_threshold(self):
+        """Return decision threshold used for binary predictions."""
+        return self.threshold
+
+    def get_test_auc(self):
+        """Return test set ROC-AUC."""
+        return self.metadata.get("test_roc_auc", None)
 
 # Example Usage (Optional - for testing within this script)
 if __name__ == '__main__':
-    # Assumes artifacts are in the project root directory AND this script is run FROM the root.
-    # Ensure the saved pipeline ('credit_risk_pipeline_v1.joblib') includes FE steps.
-    predictor = CreditPredictor(artifact_path='.') # Path relative to execution directory (root)
+    """
+    Example: Load model and make predictions on sample data.
 
-    if predictor.pipeline is not None:
-        # Create RAW sample data (matching format BEFORE FE/preprocessing in Notebook 2)
-        # Crucially includes raw fields needed for FE steps (like emp_length string, dates)
+    Run from project root:
+        python -m src.predictor
+    """
+    print("="*80)
+    print("CreditRiskPredictor Example Usage")
+    print("="*80)
+
+    try:
+        # Load predictor from default location (models/credit_risk_pipeline_investor.joblib)
+        print("\n1. Loading model from default location...")
+        artifact_path = Path.cwd() / "models" / DEFAULT_ARTIFACT_FILENAME
+        predictor = CreditRiskPredictor.from_artifact(artifact_path)
+
+        print(f"✓ Model loaded successfully")
+        print(f"  Threshold: {predictor.get_threshold():.4f}")
+        print(f"  Test AUC: {predictor.get_test_auc():.4f}")
+
+        # Create sample data (raw format - before preprocessing)
+        print("\n2. Creating sample loan applications...")
         sample_data = [
             {
-                'loan_amnt': 10000, 'term': ' 36 months', 'int_rate': 12.0,
-                'installment': 300.0, 'grade': 'B', 'sub_grade': 'B2',
-                'emp_length': '10+ years', # Raw string format
+                'loan_amnt': 10000, 'term': '36 months', 'int_rate': 12.0,
+                'emp_length': '10+ years',
                 'home_ownership': 'MORTGAGE',
                 'annual_inc': 75000, 'verification_status': 'Verified',
-                # 'issue_d': pd.to_datetime('Dec-2015'), # Example date - NEEDED if FE requires it
-                # 'earliest_cr_line': pd.to_datetime('Aug-2003'), # Example date - NEEDED if FE requires it
                 'purpose': 'debt_consolidation', 'addr_state': 'CA', 'dti': 15.0,
                 'delinq_2yrs': 0, 'fico_range_low': 700, 'fico_range_high': 704,
-                'inq_last_6mths': 1, 'open_acc': 10,
-                'pub_rec': 0, # Raw count
+                'inq_last_6mths': 1, 'open_acc': 10, 'pub_rec': 0,
                 'revol_bal': 15000, 'revol_util': 50.0, 'total_acc': 25,
-                'initial_list_status': 'f',
-                'collections_12_mths_ex_med': 0, 'application_type': 'Individual',
-                'mort_acc': 2, # Raw count
-                'pub_rec_bankruptcies': 0, # Raw count
-                'acc_now_delinq': 0, 'tot_coll_amt': 0, 'tot_cur_bal': 250000,
-                'total_rev_hi_lim': 30000, 'acc_open_past_24mths': 3,
-                'avg_cur_bal': 25000, 'bc_open_to_buy': 5000, 'bc_util': 60.0,
-                'chargeoff_within_12_mths': 0, 'delinq_amnt': 0,
-                'mo_sin_old_il_acct': 120, 'mo_sin_old_rev_tl_op': 150,
-                'mo_sin_rcnt_rev_tl_op': 10, 'mo_sin_rcnt_tl': 5,
-                'mths_since_recent_bc': 15, 'mths_since_recent_inq': 6,
-                'num_accts_ever_120_pd': 0, 'num_actv_bc_tl': 4, 'num_actv_rev_tl': 6,
-                'num_bc_sats': 5, 'num_bc_tl': 8, 'num_il_tl': 10,
-                'num_op_rev_tl': 12, 'num_rev_accts': 15, 'num_rev_tl_bal_gt_0': 6,
-                'num_sats': 10, 'num_tl_120dpd_2m': 0, 'num_tl_30dpd': 0,
-                'num_tl_90g_dpd_24m': 0, 'num_tl_op_past_12m': 2,
-                'pct_tl_nvr_dlq': 95.0, 'percent_bc_gt_75': 25.0, 'tax_liens': 0,
-                'tot_hi_cred_lim': 300000, 'total_bal_ex_mort': 50000,
-                'total_bc_limit': 15000, 'total_il_high_credit_limit': 60000,
-                'disbursement_method': 'Cash',
-
             },
-            # Add more samples if needed
+            {
+                'loan_amnt': 25000, 'term': '60 months', 'int_rate': 14.5,
+                'emp_length': '5 years',
+                'home_ownership': 'RENT',
+                'annual_inc': 50000, 'verification_status': 'Not Verified',
+                'purpose': 'credit_card', 'addr_state': 'NY', 'dti': 25.0,
+                'delinq_2yrs': 1, 'fico_range_low': 650, 'fico_range_high': 654,
+                'inq_last_6mths': 2, 'open_acc': 8, 'pub_rec': 0,
+                'revol_bal': 20000, 'revol_util': 75.0, 'total_acc': 15,
+            },
         ]
 
-        # Convert sample data to DataFrame for prediction
         sample_df = pd.DataFrame(sample_data)
+        print(f"✓ Created {len(sample_df)} sample applications")
 
-        # Important: Need to parse date columns if the FE step in the pipeline expects datetime objects
-        # This parsing might ideally happen within the pipeline using a custom transformer,
-        # but for now, we'll do it before calling predict if needed.
-        date_cols_needed_by_pipeline = ['issue_d', 'earliest_cr_line'] # Example
-        for col in date_cols_needed_by_pipeline:
-             if col in sample_df.columns:
-                 try:
-                     sample_df[col] = pd.to_datetime(sample_df[col], errors='coerce')
-                 except Exception as e:
-                     print(f"Warning: Could not parse date column '{col}' in sample data: {e}")
+        # Make predictions
+        print("\n3. Making predictions...")
+        predictions = predictor.predict_with_details(sample_df)
 
+        print("\nPrediction Results:")
+        print(predictions.to_string(index=False))
 
-        print("\n--- Making Sample Prediction ---")
-        probabilities = predictor.predict_proba(sample_df)
-        predictions = predictor.predict(sample_df)
+        print("\n" + "="*80)
+        print("✅ Example completed successfully!")
+        print("="*80)
 
-        if probabilities is not None:
-            print("Sample Probabilities (is_bad=1):")
-            print(probabilities)
-            print("Sample Predictions (0=Good, 1=Bad):")
-            print(predictions)
+    except FileNotFoundError as e:
+        print(f"\n❌ Error: {e}")
+        print(f"\nTo use this example:")
+        print(f"1. Run Notebook 2 to generate the artifact")
+        print(f"2. The artifact will be saved to: models/{DEFAULT_ARTIFACT_FILENAME}")
+        print(f"3. Then run this script from the project root")
