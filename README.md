@@ -203,6 +203,4 @@ The F2-optimized decision boundary (0.3794) rejects 83% of approved loans to cap
 - **Concept drift monitoring:** Establish automated detection for distributional shifts in new loan populations relative to training data
 - **Business-driven threshold optimization:** Calibrate decision thresholds based on business metrics (e.g., expected portfolio loss) rather than statistical measures alone
 
-## Contact
 
-Add your contact information here (email, LinkedIn, GitHub, portfolio site). 
